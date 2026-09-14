@@ -33,6 +33,7 @@ const Dashboard = {
     const tcs = App.state.testcases;
     const bugs = App.state.bugs;
     const s = this.computeStats(tcs, bugs);
+    const resStats = computeBugResolutionStats(bugs);
     const passRate = s.totalTC ? Math.round((s.passed/s.totalTC)*100) : 0;
     const pct = (n) => s.totalTC ? Math.round((n/s.totalTC)*1000)/10 : 0;
 
@@ -64,12 +65,17 @@ const Dashboard = {
       <div class="sum-section">
         <div class="sum-section-head"><span class="icon">🐞</span><h2 style="color:var(--status-failed);">BUG REPORT SUMMARY</h2></div>
         <p class="sum-hint">Ringkasan berdasarkan filter yang dipilih</p>
-        <div class="grid grid-2col" style="grid-template-columns:220px 1fr 1fr; gap:16px;">
+        <div class="bug-summary-grid">
           <div class="sum-card" style="--card-accent:var(--status-failed); --card-accent-bg:var(--status-failed-bg); justify-content:center;">
             <div class="sum-card-top"><span class="sum-card-icon">🐞</span><span class="sum-card-label">Total Bug</span></div>
             <span class="sum-card-value">${s.totalBug}</span>
             <span class="sum-card-sub">100% dari keseluruhan bug</span>
             <div class="sum-mini-bar"><span style="width:100%;"></span></div>
+          </div>
+          <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
+            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Rata-rata Waktu Resolusi</span></div>
+            <span class="sum-card-value">${formatDuration(resStats.avgHours)}</span>
+            <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
           ${this.donutCard('Distribusi Severity', s.totalBug, 'Total Bug',
             ['Critical','High','Medium','Low'], [s.critical,s.high,s.medium,s.low],

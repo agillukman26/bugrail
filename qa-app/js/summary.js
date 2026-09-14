@@ -99,6 +99,7 @@ const Summary = {
     const passRate = total ? Math.round((passed/total)*100) : 0;
     const failRate = total ? Math.round((failed/total)*100) : 0;
     const pct = (n) => total ? Math.round((n/total)*1000)/10 : 0;
+    const resStats = computeBugResolutionStats(bugs);
 
     document.getElementById('sumBody').innerHTML = `
       <div class="sum-section">
@@ -135,6 +136,11 @@ const Summary = {
             <span class="sum-card-value">${bugs.length}</span>
             <span class="sum-card-sub">100% dari keseluruhan bug</span>
             <div class="sum-mini-bar"><span style="width:100%;"></span></div>
+          </div>
+          <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
+            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Rata-rata Waktu Resolusi</span></div>
+            <span class="sum-card-value">${formatDuration(resStats.avgHours)}</span>
+            <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
           ${this.donutCard('Distribusi Severity', bugs.length, 'Total Bug',
             ['Critical','High','Medium','Low'],
@@ -203,66 +209,148 @@ const Summary = {
     });
   },
 
-  /* Insight lines derived from the current filtered summary — same numbers
-     shown on screen, turned into plain-language conclusions for the PDF. */
+/* Insight + recommendation lines derived from the current filtered summary —
+     same numbers shown on screen, turned into plain-language conclusions
+     (what's happening) and actionable recommendations (what to do) for the PDF. */
   buildAnalysis(d){
     const bugs = d.bugs || [];
-    const notes = [];
+    const tcs = this._lastTC || [];
+    const findings = [];
+    const recommendations = [];
 
     if (!d.total){
-      notes.push('Belum ada test case pada rentang filter ini.');
+      findings.push('Belum ada test case pada rentang filter ini.');
     } else if (d.passRate >= 80){
-      notes.push(`Progress testing baik: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
+      findings.push(`Progress testing baik: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
     } else if (d.passRate >= 50){
-      notes.push(`Progress testing masih moderat: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed), perlu percepatan eksekusi/perbaikan.`);
-    } else {
-      notes.push(`Pass rate rendah: ${d.passRate}% (${d.passed}/${d.total} test case Passed), perlu perhatian segera.`);
+      findings.push(`Progress testing masih moderat: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
+      recommendations.push('Percepat eksekusi test case yang masih Open agar coverage lebih representatif sebelum rilis.');
+    } else if (d.total) {
+      findings.push(`Pass rate rendah: ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
+      recommendations.push('Pass rate di bawah 50% berisiko tinggi untuk rilis — pertimbangkan menunda rilis sampai isu utama diperbaiki.');
     }
 
-    if (d.failed) notes.push(`Terdapat ${d.failed} test case Failed (${d.failRate}%) yang berpotensi menghasilkan bug baru.`);
-    if (d.blocked) notes.push(`${d.blocked} test case masih Blocked, kemungkinan menunggu dependency/environment.`);
-    if (d.notrun) notes.push(`${d.notrun} test case belum dieksekusi (Open).`);
+    if (d.failed){
+      findings.push(`Terdapat ${d.failed} test case Failed (${d.failRate}%) yang berpotensi menghasilkan bug baru.`);
+      if (!bugs.length) recommendations.push(`${d.failed} test case Failed belum punya bug report terkait — pastikan semua kegagalan sudah dicatat sebagai bug.`);
+    }
+    if (d.blocked){
+      findings.push(`${d.blocked} test case masih Blocked, kemungkinan menunggu dependency/environment.`);
+      recommendations.push('Tindak lanjuti test case Blocked dengan tim terkait (environment/data/akses) agar tidak menghambat eksekusi.');
+    }
+    if (d.notrun) findings.push(`${d.notrun} test case belum dieksekusi (Open).`);
+    if (d.retest) findings.push(`${d.retest} test case berstatus Retest, menunggu verifikasi ulang setelah perbaikan.`);
 
     const moduleStats = {};
-    (this._lastTC || []).forEach(t => {
+    tcs.forEach(t => {
       if (!t.module) return;
       moduleStats[t.module] = moduleStats[t.module] || { total:0, failed:0 };
       moduleStats[t.module].total++;
       if (t.status === 'Failed') moduleStats[t.module].failed++;
     });
-    const worstModule = Object.entries(moduleStats)
+    const riskyModules = Object.entries(moduleStats)
       .filter(([,s]) => s.failed > 0)
-      .sort((a,b) => (b[1].failed/b[1].total) - (a[1].failed/a[1].total))[0];
-    if (worstModule) notes.push(`Modul dengan tingkat kegagalan tertinggi: "${worstModule[0]}" (${worstModule[1].failed}/${worstModule[1].total} test case Failed).`);
+      .sort((a,b) => (b[1].failed/b[1].total) - (a[1].failed/a[1].total))
+      .slice(0, 3);
+    if (riskyModules.length){
+      findings.push(`Modul dengan tingkat kegagalan tertinggi: ${riskyModules.map(([m,s]) => `"${m}" (${s.failed}/${s.total})`).join(', ')}.`);
+      recommendations.push(`Fokuskan regresi dan review kode pada modul "${riskyModules[0][0]}" karena proporsi kegagalannya paling tinggi.`);
+    }
 
     if (!bugs.length){
-      notes.push('Tidak ada bug tercatat pada rentang filter ini.');
+      findings.push('Tidak ada bug tercatat pada rentang filter ini.');
     } else {
       const critical = bugs.filter(b=>b.severity==='Critical').length;
       const high = bugs.filter(b=>b.severity==='High').length;
       const openBugs = bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length;
+      const reopened = bugs.filter(b=>b.status==='Reopened').length;
       const closedBugs = bugs.filter(b=>b.status==='Closed').length;
-      if (critical) notes.push(`${critical} bug berseverity Critical, disarankan diprioritaskan sebelum rilis.`);
-      if (high) notes.push(`${high} bug berseverity High menunggu perbaikan.`);
-      notes.push(`${openBugs} bug masih terbuka (Open/Assigned/Reopened), ${closedBugs} bug sudah Closed dari total ${bugs.length} bug.`);
+      findings.push(`${openBugs} bug masih terbuka (Open/Assigned/Reopened), ${closedBugs} bug sudah Closed dari total ${bugs.length} bug.`);
+
+      if (critical){
+        findings.push(`${critical} bug berseverity Critical tercatat pada rentang ini.`);
+        recommendations.push(`Prioritaskan ${critical} bug Critical untuk diperbaiki sebelum rilis berikutnya — potensi dampak tinggi ke pengguna.`);
+      }
+      if (high) findings.push(`${high} bug berseverity High menunggu perbaikan.`);
+      if (reopened){
+        findings.push(`${reopened} bug berstatus Reopened, menandakan perbaikan sebelumnya belum tuntas.`);
+        recommendations.push('Telusuri root cause pada bug yang di-reopen agar fix berikutnya tidak berulang gagal.');
+      }
+
+      const retestRounds = bugs.map(b => ({ id: b.id, title: b.title, count: BugReportModule.reopenCount(b) }))
+        .filter(r => r.count > 0)
+        .sort((a,b) => b.count - a.count);
+      if (retestRounds.length){
+        const totalRounds = retestRounds.reduce((sum,r) => sum + r.count, 0);
+        const once = retestRounds.filter(r => r.count === 1).length;
+        const twice = retestRounds.filter(r => r.count === 2).length;
+        const chronic = retestRounds.filter(r => r.count >= 3);
+        findings.push(`${retestRounds.length} bug pernah retest (reopen) setidaknya 1x, total ${totalRounds} kali retest.`);
+        findings.push(`Distribusi retest: ${once} bug retest 1x, ${twice} bug retest 2x, ${chronic.length} bug retest 3x atau lebih.`);
+        if (chronic.length){
+          findings.push(`Bug retest kronis (>=3x): ${chronic.map(r => `${r.id} - "${r.title}" (${r.count}x)`).join(', ')}.`);
+          recommendations.push(`${chronic.length} bug sudah retest 3x atau lebih — indikasi fix asal-asalan atau requirement kurang jelas, perlu review mendalam dan keterlibatan dev senior sebelum fix berikutnya.`);
+        } else {
+          const worst = retestRounds[0];
+          if (worst.count > 1){
+            findings.push(`Bug paling sering retest: ${worst.id} - "${worst.title}" (${worst.count}x reopen).`);
+            recommendations.push(`Bug ${worst.id} sudah retest ${worst.count}x — review lebih dalam sebelum fix berikutnya, kemungkinan ada kasus yang belum tercover.`);
+          }
+        }
+      }
+
+      const res = computeBugResolutionStats(bugs);
+      if (res.resolvedCount){
+        findings.push(`Rata-rata waktu resolusi bug (Open -> Closed): ${formatDuration(res.avgHours)}, dihitung dari ${res.resolvedCount} bug.`);
+        if (res.avgHours > 72) recommendations.push('Rata-rata waktu resolusi lebih dari 3 hari — evaluasi kembali prioritas assignment dan kapasitas tim development.');
+      }
+
+      const testerStats = {};
+      bugs.forEach(b => { if (b.tester) testerStats[b.tester] = (testerStats[b.tester]||0) + 1; });
+      const topTester = Object.entries(testerStats).sort((a,b) => b[1]-a[1])[0];
+      if (topTester && Object.keys(testerStats).length > 1) findings.push(`Tester dengan bug terbanyak dilaporkan: ${topTester[0]} (${topTester[1]} bug).`);
+
+      const oldOpen = bugs.filter(b => ['Open','Assigned','Reopened'].includes(b.status) && b.reportDate &&
+        (Date.now() - new Date(b.reportDate).getTime()) / 36e5 > 168);
+      if (oldOpen.length) recommendations.push(`${oldOpen.length} bug open sudah lebih dari 7 hari tanpa penyelesaian — perlu eskalasi.`);
     }
 
-    return notes;
+    if (!recommendations.length) recommendations.push('Tidak ada catatan risiko signifikan pada rentang filter ini — pertahankan ritme testing saat ini.');
+
+    return { findings, recommendations };
   },
 
   exportPDF(){
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
+    doc.setFont('helvetica', 'normal');
     const d = this._lastData || {};
     const pageW = doc.internal.pageSize.getWidth();
-    const primary = [57, 73, 171];
+    const pageH = doc.internal.pageSize.getHeight();
+    const ink = [31, 41, 55];       // dark slate — headings
+    const dim = [107, 114, 128];    // muted gray — sub text
+    const line = [222, 226, 232];   // hairline gray — table borders
+    const soft = [246, 247, 249];   // pale gray — header fill / zebra
 
-    doc.setFillColor(...primary);
-    doc.rect(0, 0, pageW, 22, 'F');
-    doc.setTextColor(255,255,255); doc.setFontSize(16);
-    doc.text('QA Testing Summary Report', 14, 14);
-    doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString('id-ID')}`, pageW - 14, 14, { align: 'right' });
+    const sectionTitle = (text, y) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(...ink);
+      doc.text(text, 14, y);
+      doc.setDrawColor(...line); doc.setLineWidth(.4);
+      doc.line(14, y + 2, pageW - 14, y + 2);
+      doc.setFont('helvetica', 'normal');
+      return y + 8;
+    };
+    const ensureSpace = (y, needed) => {
+      if (y + needed > pageH - 14){ doc.addPage(); return 16; }
+      return y;
+    };
+
+    doc.setTextColor(...ink); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.text('QA Testing Summary Report', 14, 18);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...dim);
+    doc.text(`Generated: ${new Date().toLocaleString('id-ID')}`, pageW - 14, 18, { align: 'right' });
+    doc.setDrawColor(...ink); doc.setLineWidth(.6);
+    doc.line(14, 22, pageW - 14, 22);
 
     const filterBits = [];
     if (this.filters.fileId){
@@ -273,14 +361,19 @@ const Summary = {
     if (this.filters.tester) filterBits.push(`Tester: ${this.filters.tester}`);
     if (this.filters.dateFrom) filterBits.push(`Dari: ${this.filters.dateFrom}`);
     if (this.filters.dateTo) filterBits.push(`Sampai: ${this.filters.dateTo}`);
-    doc.setTextColor(90); doc.setFontSize(9);
-    doc.text(filterBits.length ? `Filter: ${filterBits.join(' | ')}` : 'Filter: Semua Data', 14, 30);
+    doc.setFontSize(9); doc.setTextColor(...dim);
+    doc.text(filterBits.length ? `Filter: ${filterBits.join(' | ')}` : 'Filter: Semua Data', 14, 29);
 
-    let y = 40;
-    doc.setTextColor(20); doc.setFontSize(12);
-    doc.text('Test Case Summary', 14, y);
-    y += 4;
+    const tableTheme = {
+      theme: 'grid',
+      headStyles: { fillColor: soft, textColor: ink, halign: 'center', fontStyle: 'bold', lineColor: line, lineWidth: .3 },
+      bodyStyles: { halign: 'center', textColor: ink, lineColor: line, lineWidth: .3 },
+      alternateRowStyles: { fillColor: [252, 252, 253] },
+      styles: { fontSize: 9, font: 'helvetica' },
+      margin: { left: 14, right: 14 }
+    };
 
+    let y = sectionTitle('Test Case Summary', 38);
     doc.autoTable({
       startY: y,
       head: [['Total Module','Total TC','Open','Passed','Blocked','Failed','Retest','Pass Rate']],
@@ -288,18 +381,11 @@ const Summary = {
         d.tcs?.totalModules ?? '', d.total || 0, d.notrun || 0, d.passed || 0,
         d.blocked || 0, d.failed || 0, d.retest || 0, `${d.passRate || 0}%`
       ]],
-      theme: 'grid',
-      headStyles: { fillColor: primary, textColor: 255, halign: 'center' },
-      bodyStyles: { halign: 'center' },
-      styles: { fontSize: 9 },
-      margin: { left: 14, right: 14 }
+      ...tableTheme
     });
-    y = doc.lastAutoTable.finalY + 10;
+    y = doc.lastAutoTable.finalY + 12;
 
-    doc.setFontSize(12); doc.setTextColor(20);
-    doc.text('Bug Report Summary', 14, y);
-    y += 4;
-
+    y = sectionTitle('Bug Report Summary', y);
     const bugs = d.bugs || [];
     doc.autoTable({
       startY: y,
@@ -313,37 +399,95 @@ const Summary = {
         bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length,
         bugs.filter(b=>b.status==='Closed').length
       ]],
-      theme: 'grid',
-      headStyles: { fillColor: [214,69,80], textColor: 255, halign: 'center' },
-      bodyStyles: { halign: 'center' },
-      styles: { fontSize: 9 },
-      margin: { left: 14, right: 14 }
+      ...tableTheme
     });
-    y = doc.lastAutoTable.finalY + 8;
+    y = doc.lastAutoTable.finalY + 10;
 
+    y = ensureSpace(y, 55);
     [['sumDonutSeverity','Distribusi Severity'], ['sumDonutPriority','Distribusi Priority']].forEach(([id, label], i) => {
       const canvas = document.getElementById(id);
       if (!canvas) return;
       const x = 14 + i * 95;
-      doc.setFontSize(10); doc.setTextColor(20);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...ink);
       doc.text(label, x, y);
+      doc.setFont('helvetica', 'normal');
       doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y + 3, 40, 40);
     });
     y += 50;
 
-    doc.setFontSize(12); doc.setTextColor(20);
-    doc.text('Analisa & Rekomendasi', 14, y);
-    y += 6;
-    doc.setFontSize(9.5); doc.setTextColor(50);
-    this.buildAnalysis(d).forEach(note => {
+    const { findings, recommendations } = this.buildAnalysis(d);
+
+    y = ensureSpace(y, 16);
+    y = sectionTitle('Analisa', y);
+    doc.setFontSize(9.5); doc.setTextColor(...ink);
+    findings.forEach(note => {
       const wrapped = doc.splitTextToSize(`•  ${note}`, pageW - 28);
-      if (y + wrapped.length * 5 > doc.internal.pageSize.getHeight() - 10){ doc.addPage(); y = 16; }
+      y = ensureSpace(y, wrapped.length * 5);
+      doc.text(wrapped, 14, y);
+      y += wrapped.length * 5 + 2;
+    });
+    y += 4;
+
+    y = ensureSpace(y, 16);
+    y = sectionTitle('Rekomendasi', y);
+    doc.setFontSize(9.5); doc.setTextColor(...ink);
+    recommendations.forEach(note => {
+      const wrapped = doc.splitTextToSize(`•  ${note}`, pageW - 28);
+      y = ensureSpace(y, wrapped.length * 5);
       doc.text(wrapped, 14, y);
       y += wrapped.length * 5 + 2;
     });
 
     doc.save(`QA_Summary_${todayISO()}.pdf`);
     Toast.show('Export PDF Summary berhasil.', 'success');
+  },
+
+  /* Same numbers as the PDF (test case + bug totals, per-bug retest count,
+     findings/recommendations) but as a workbook so the raw analytic data
+     can be reused elsewhere (pivot, share with stakeholders, etc). */
+  exportExcel(){
+    const d = this._lastData || {};
+    const bugs = d.bugs || [];
+    const { findings, recommendations } = this.buildAnalysis(d);
+
+    const tcSheet = XLSX.utils.json_to_sheet([{
+      'Total Module': d.tcs?.totalModules ?? 0, 'Total Test Case': d.total || 0,
+      Open: d.notrun || 0, Passed: d.passed || 0, Blocked: d.blocked || 0,
+      Failed: d.failed || 0, Retest: d.retest || 0, 'Pass Rate (%)': d.passRate || 0
+    }]);
+
+    const resStats = computeBugResolutionStats(bugs);
+    const bugSheet = XLSX.utils.json_to_sheet([{
+      'Total Bug': bugs.length,
+      Critical: bugs.filter(b=>b.severity==='Critical').length,
+      High: bugs.filter(b=>b.severity==='High').length,
+      Medium: bugs.filter(b=>b.severity==='Medium').length,
+      Low: bugs.filter(b=>b.severity==='Low').length,
+      Open: bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length,
+      Closed: bugs.filter(b=>b.status==='Closed').length,
+      'Avg Resolusi (jam)': resStats.avgHours || 0,
+      'Bug Terukur Resolusi': resStats.resolvedCount || 0
+    }]);
+
+    const retestSheet = XLSX.utils.json_to_sheet(
+      bugs.map(b => ({
+        'Bug ID': b.id, 'Bug Title': b.title, Module: b.module, Severity: b.severity,
+        Status: b.status, 'Jumlah Retest': BugReportModule.reopenCount(b)
+      })).sort((a,b) => b['Jumlah Retest'] - a['Jumlah Retest'])
+    );
+
+    const analysisSheet = XLSX.utils.json_to_sheet([
+      ...findings.map(text => ({ Tipe: 'Analisa', Catatan: text })),
+      ...recommendations.map(text => ({ Tipe: 'Rekomendasi', Catatan: text }))
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, tcSheet, 'Test Case Summary');
+    XLSX.utils.book_append_sheet(wb, bugSheet, 'Bug Summary');
+    XLSX.utils.book_append_sheet(wb, retestSheet, 'Retest per Bug');
+    XLSX.utils.book_append_sheet(wb, analysisSheet, 'Analisa & Rekomendasi');
+    XLSX.writeFile(wb, `QA_Summary_Data_${todayISO()}.xlsx`);
+    Toast.show('Export Data Summary berhasil.', 'success');
   },
 
   bindStaticEvents(){
@@ -356,6 +500,7 @@ const Summary = {
     document.getElementById('sumDateFrom').addEventListener('change', e => { this.filters.dateFrom = e.target.value; this.render(); });
     document.getElementById('sumDateTo').addEventListener('change', e => { this.filters.dateTo = e.target.value; this.render(); });
     document.getElementById('sumExportPdfBtn').addEventListener('click', () => this.exportPDF());
+    document.getElementById('sumExportExcelBtn').addEventListener('click', () => this.exportExcel());
   }
 };
 
