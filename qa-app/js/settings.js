@@ -4,6 +4,10 @@
 
 const SettingsModule = {
   render(){
+    if (!Auth.can('settings')){
+      document.getElementById('page-settings').innerHTML = `<p class="text-faint" style="padding:24px 0; text-align:center;">Anda tidak punya akses ke halaman ini.</p>`;
+      return;
+    }
     const bytes = new Blob([
       JSON.stringify(App.state.testcases),
       JSON.stringify(App.state.bugs)

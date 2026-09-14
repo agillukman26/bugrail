@@ -22,9 +22,25 @@ const App = {
     this.state.files = Storage.get(STORAGE_KEYS.FILES, []);
     this.state.settings = Storage.get(STORAGE_KEYS.SETTINGS, { theme: 'light', customFieldDefs: [] });
     this.state.testcases.forEach(t => { if (t.status === 'Not Run') t.status = 'Open'; });
+    this.ensureRoles();
+    this.ensureRolePermissions();
+    if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
     IdGen.syncAllFromExisting(this.state.testcases.map(t => t.id));
     IdGen.syncFromExisting('BUG', this.state.bugs.map(b => b.id));
+  },
+  /* Merge default permissions into settings so newly-added permission keys
+     show up on the matrix, without clobbering an admin's saved overrides. */
+  ensureRolePermissions(){
+    if (!this.state.settings.rolePermissions) this.state.settings.rolePermissions = {};
+    Auth.customRoles().forEach(r => {
+      this.state.settings.rolePermissions[r.value] = { ...(Auth.DEFAULT_ROLE_PERMISSIONS[r.value] || {}), ...(this.state.settings.rolePermissions[r.value] || {}) };
+    });
+  },
+  /* First load: seed settings.roles from the legacy hardcoded list so existing
+     accounts keep working; from then on roles are managed entirely from the UI. */
+  ensureRoles(){
+    if (!this.state.settings.roles) this.state.settings.roles = Auth.DEFAULT_ROLES.slice();
   },
   /* Test cases created before file grouping existed (or imported without one)
      fall back into an auto-created "Default" file. */
@@ -82,6 +98,7 @@ const App = {
       summary: ['Summary', 'Rekap progres testing & bug'],
       importexport: ['Import & Export', 'Import Test Case, export data, backup & restore'],
       usermanagement: ['User Management', 'Kelola akun login (Admin & User)'],
+      rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
       settings: ['Settings', 'Preferensi aplikasi & data'],
       masterstatus: ['Status Bug Report', 'Master data status bug report']
     };
@@ -97,6 +114,28 @@ const App = {
     if (page === 'masterstatus') MasterStatusModule.render();
 
     document.getElementById('sidebar').classList.remove('open');
+  },
+
+  /* Hides sidebar entries the current role can't use. Role Permission stays
+     admin-only always (managing roles/permissions is a superadmin action). */
+  applyNavPermissions(){
+    const setVisible = (page, visible) => {
+      const el = document.querySelector(`.nav-item[data-page="${page}"], .nav-subitem[data-page="${page}"]`);
+      if (el) el.style.display = visible ? '' : 'none';
+    };
+    setVisible('dashboard', Auth.can('dashboard'));
+    setVisible('summary', Auth.can('summary'));
+    setVisible('testcase', Auth.can('testcase_read'));
+    setVisible('bugreport', Auth.can('bugreport_read'));
+    setVisible('masterstatus', Auth.can('master'));
+    setVisible('usermanagement', Auth.can('usermanagement'));
+    setVisible('rolepermission', Auth.isAdmin());
+    setVisible('workspace', Auth.isAdmin());
+    setVisible('settings', Auth.can('settings'));
+    const masterGroup = document.getElementById('navGroupMaster');
+    if (masterGroup) masterGroup.style.display = Auth.can('master') ? '' : 'none';
+    const userMgmtGroup = document.getElementById('navGroupUserManagement');
+    if (userMgmtGroup) userMgmtGroup.style.display = (Auth.can('usermanagement') || Auth.isAdmin()) ? '' : 'none';
   },
 
   renderSidebarCounts(){
@@ -127,6 +166,7 @@ const App = {
     this.loadAll();
     this.applyTheme();
     this.renderSidebarCounts();
+    this.applyNavPermissions();
 
     const closeSidebar = () => {
       document.getElementById('sidebar').classList.remove('open');
@@ -193,7 +233,13 @@ const App = {
       }
     });
 
-    this.goTo('dashboard');
+    this.goTo(this.firstAllowedPage());
+  },
+
+  firstAllowedPage(){
+    const order = [['dashboard','dashboard'],['summary','summary'],['testcase','testcase_read'],['bugreport','bugreport_read']];
+    const found = order.find(([, perm]) => Auth.can(perm));
+    return found ? found[0] : 'dashboard';
   }
 };
 

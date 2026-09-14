@@ -25,6 +25,10 @@ const MasterStatusModule = {
   },
 
   render(){
+    if (!Auth.can('master')){
+      document.getElementById('page-masterstatus').innerHTML = `<p class="text-faint" style="padding:24px 0; text-align:center;">Anda tidak punya akses ke halaman ini.</p>`;
+      return;
+    }
     const list = this.list().slice().sort((a, b) => a.order - b.order);
     document.getElementById('msTableBody').innerHTML = list.length ? list.map((s, i) => `
       <tr>
@@ -33,10 +37,10 @@ const MasterStatusModule = {
         <td>${BugReportModule.statusBadge(s.name)}</td>
         <td><span class="dot" style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${s.color}; margin-right:6px;"></span>${escapeHtml(s.color)}</td>
         <td>${s.order}</td>
-        <td>
-          <button class="btn sm ghost" data-edit="${escapeHtml(s.code)}">✎</button>
-          <button class="btn sm danger" data-del="${escapeHtml(s.code)}">🗑</button>
-        </td>
+        <td>${actionMenu(`
+          <button data-edit="${escapeHtml(s.code)}">✎ Edit</button>
+          <button class="danger" data-del="${escapeHtml(s.code)}">🗑 Hapus</button>
+        `)}</td>
       </tr>
     `).join('') : `<tr><td colspan="6" class="text-faint" style="text-align:center;">Belum ada status.</td></tr>`;
 
@@ -57,6 +61,22 @@ const MasterStatusModule = {
     document.getElementById('msOrder').value = this.list().length + 1;
   },
 
+  openModal(){
+    document.getElementById('msModalOverlay').classList.add('active');
+  },
+
+  closeModal(){
+    document.getElementById('msModalOverlay').classList.remove('active');
+  },
+
+  startCreate(){
+    this.clearForm();
+    this.clearErrors();
+    document.getElementById('msModalTitle').textContent = 'Tambah Status Bug Report';
+    this.openModal();
+    document.getElementById('msName').focus();
+  },
+
   startEdit(code){
     const s = this.list().find(x => x.code === code);
     if (!s) return;
@@ -66,15 +86,32 @@ const MasterStatusModule = {
     document.getElementById('msColorPicker').value = s.color;
     document.getElementById('msColorHex').value = s.color;
     document.getElementById('msOrder').value = s.order;
+    this.clearErrors();
+    document.getElementById('msModalTitle').textContent = 'Edit Status Bug Report';
+    this.openModal();
     document.getElementById('msName').focus();
   },
 
+  clearErrors(){
+    document.getElementById('msNameError').classList.remove('show');
+    document.getElementById('msColorError').classList.remove('show');
+  },
+
+  showError(id, msg){
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.classList.add('show');
+  },
+
   save(){
+    this.clearErrors();
     const name = document.getElementById('msName').value.trim();
     const color = document.getElementById('msColorHex').value.trim();
     const order = Number(document.getElementById('msOrder').value) || 1;
-    if (!name){ Toast.show('Nama Status wajib diisi.', 'error'); return; }
-    if (!/^#[0-9A-Fa-f]{6}$/.test(color)){ Toast.show('Warna Label harus format hex, contoh #2563EB.', 'error'); return; }
+    let hasError = false;
+    if (!name){ this.showError('msNameError', 'Nama Status wajib diisi.'); hasError = true; }
+    if (!/^#[0-9A-Fa-f]{6}$/.test(color)){ this.showError('msColorError', 'Warna Label harus format hex, contoh #2563EB.'); hasError = true; }
+    if (hasError) return;
 
     const list = this.list();
     const editCode = document.getElementById('msEditCode').value;
@@ -82,8 +119,9 @@ const MasterStatusModule = {
     if (editCode){
       const s = list.find(x => x.code === editCode);
       if (list.some(x => x.code !== editCode && x.name === name)){
-        Toast.show('Nama status sudah dipakai.', 'error'); return;
+        this.showError('msNameError', 'Nama status sudah dipakai.'); hasError = true;
       }
+      if (hasError) return;
       if (s.name !== name){
         App.state.bugs.forEach(b => { if (b.status === s.name) b.status = name; });
         App.saveBugs();
@@ -92,13 +130,15 @@ const MasterStatusModule = {
       Toast.show(`Status "${name}" disimpan.`, 'success');
     } else {
       if (list.some(x => x.name === name)){
-        Toast.show('Nama status sudah dipakai.', 'error'); return;
+        this.showError('msNameError', 'Nama status sudah dipakai.'); hasError = true;
       }
+      if (hasError) return;
       list.push({ code: this.generateCode(name), name, color, order });
       Toast.show(`Status "${name}" ditambahkan.`, 'success');
     }
     App.saveSettings();
     this.clearForm();
+    this.closeModal();
     this.render();
   },
 
@@ -129,8 +169,11 @@ const MasterStatusModule = {
     document.getElementById('msColorHex').addEventListener('input', e => {
       if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('msColorPicker').value = e.target.value;
     });
-    document.getElementById('msClearBtn').addEventListener('click', () => this.clearForm());
+    document.getElementById('msCreateBtn').addEventListener('click', () => this.startCreate());
     document.getElementById('msSaveBtn').addEventListener('click', () => this.save());
+    document.querySelectorAll('#msModalOverlay [data-close]').forEach(btn => {
+      btn.addEventListener('click', () => this.closeModal());
+    });
     this.clearForm();
   }
 };
