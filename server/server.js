@@ -51,6 +51,91 @@ app.put('/api/kv/:key', async (req, res) => {
   }
 });
 
+const VALID_FIELDS = ['module', 'roleUser', 'scenario', 'testCase', 'preconditions', 'steps', 'testData', 'expectedResult', 'typeTest'];
+
+function buildTestForgePrompt(mode, content, fields, module){
+  const fieldList = fields.join(', ');
+  const moduleHint = module ? `The module/feature under test is "${module}".` : '';
+  const sourceLabel = mode === 'brs' ? 'the following BRS (Business Requirement Specification) text'
+    : mode === 'screenshot' ? 'the attached application screenshot(s)'
+    : 'the following description';
+  return `You are a QA test case generator. Based on ${sourceLabel}, generate a JSON array of test cases.
+${moduleHint}
+Each object in the array must contain ONLY these fields: ${fieldList}.
+Field meanings: module=feature area name, roleUser=user role performing the action, scenario=short scenario title, testCase=detailed test case description, preconditions=state required before testing, steps=numbered test steps as plain text (one step per line), testData=input data to use, expectedResult=expected outcome, typeTest=either "Positive" or "Negative".
+Respond with ONLY the JSON array, no markdown fences, no explanation.
+${mode !== 'screenshot' ? `Content:\n${content}` : (content ? `Additional instructions: ${content}` : '')}`;
+}
+
+app.post('/api/testforge/generate', async (req, res) => {
+  try {
+    const { mode, content, images, fields, module } = req.body || {};
+    if (!['brs', 'screenshot', 'text'].includes(mode)) {
+      return res.status(400).json({ error: 'Invalid mode' });
+    }
+    const cleanFields = Array.isArray(fields) ? fields.filter(f => VALID_FIELDS.includes(f)) : [];
+    if (!cleanFields.length) {
+      return res.status(400).json({ error: 'No valid fields selected' });
+    }
+    if (mode !== 'screenshot' && !String(content || '').trim()) {
+      return res.status(400).json({ error: 'Content is required for this mode' });
+    }
+    if (mode === 'screenshot' && (!Array.isArray(images) || !images.length)) {
+      return res.status(400).json({ error: 'At least one image is required for screenshot mode' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured on server' });
+
+    const promptText = buildTestForgePrompt(mode, content, cleanFields, module);
+    const parts = [{ text: promptText }];
+    if (mode === 'screenshot') {
+      images.forEach(dataUrl => {
+        const m = String(dataUrl).match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+        if (m) parts.push({ inline_data: { mime_type: m[1], data: m[2] } });
+      });
+    }
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts }] })
+      }
+    );
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error('Gemini API error', geminiRes.status, errText);
+      return res.status(502).json({ error: 'AI provider error', raw: errText });
+    }
+    const geminiJson = await geminiRes.json();
+    const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      return res.status(502).json({ error: 'AI response had no JSON array', raw: rawText });
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      return res.status(502).json({ error: 'AI response JSON parse failed', raw: rawText });
+    }
+    if (!Array.isArray(parsed)) {
+      return res.status(502).json({ error: 'AI response was not an array', raw: rawText });
+    }
+    const testcases = parsed.map(tc => {
+      const out = {};
+      cleanFields.forEach(f => { out[f] = typeof tc[f] === 'string' ? tc[f] : ''; });
+      return out;
+    });
+    res.json({ testcases });
+  } catch (err) {
+    console.error('POST /api/testforge/generate failed', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
