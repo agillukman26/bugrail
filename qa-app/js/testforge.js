@@ -91,7 +91,34 @@ const TestForgeModule = {
       </div>`;
   },
 
-  renderReviewStep(){ return '<p>placeholder — Task 4</p>'; },
+  renderReviewStep(){
+    if (!this.ui.staged.length) {
+      return `
+        <p class="text-dim">Tidak ada hasil generate.</p>
+        <div class="modal-footer">
+          <button type="button" class="btn" id="tfBackToGenBtn">◂ Generate Ulang</button>
+        </div>`;
+    }
+    const fieldKeys = Array.from(this.ui.fields);
+    const rows = this.ui.staged.map((tc, i) => `
+      <div class="tf-staged-row card" style="margin-bottom:10px; padding:12px;">
+        <div class="flex-between">
+          <b>#${i + 1}</b>
+          <button type="button" class="btn sm danger" data-del-staged="${i}">🗑 Hapus</button>
+        </div>
+        ${fieldKeys.map(key => `
+          <div class="field">
+            <label>${TESTFORGE_FIELDS.find(f => f.key === key).label}</label>
+            <textarea data-staged-field="${i}:${key}" rows="${key === 'steps' || key === 'testCase' ? 3 : 1}">${tc[key] || ''}</textarea>
+          </div>`).join('')}
+      </div>`).join('');
+    return `
+      <div class="tf-staged-list">${rows}</div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="tfBackToGenBtn">◂ Generate Ulang</button>
+        <button type="button" class="btn primary" id="tfSaveAllBtn">Simpan Semua ke Test Case</button>
+      </div>`;
+  },
 
   bindStepEvents(){
     if (this.ui.step === 'template') {
@@ -174,7 +201,56 @@ const TestForgeModule = {
     }
   },
 
-  bindReviewEvents(){}
+  bindReviewEvents(){
+    document.querySelectorAll('[data-del-staged]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.ui.staged.splice(Number(btn.dataset.delStaged), 1);
+        this.render();
+      });
+    });
+    document.querySelectorAll('[data-staged-field]').forEach(el => {
+      el.addEventListener('input', () => {
+        const [idx, key] = el.dataset.stagedField.split(':');
+        this.ui.staged[Number(idx)][key] = el.value;
+      });
+    });
+    const backBtn = document.getElementById('tfBackToGenBtn');
+    if (backBtn) backBtn.addEventListener('click', () => { this.ui.step = 'generate'; this.render(); });
+    const saveBtn = document.getElementById('tfSaveAllBtn');
+    if (saveBtn) saveBtn.addEventListener('click', () => this.saveAll());
+  },
+
+  saveAll(){
+    if (!Auth.can('testcase_create')) { Toast.show('Tidak punya izin menambah Test Case.', 'error'); return; }
+    const fileId = TestCaseModule.ui.activeFileId;
+    this.ui.staged.forEach(tc => {
+      const module = tc.module || '';
+      const newId = IdGen.next(moduleAbbrev(module));
+      App.state.testcases.push({
+        id: newId,
+        module,
+        roleUser: tc.roleUser || '',
+        scenario: tc.scenario || '',
+        testCase: tc.testCase || '',
+        preconditions: tc.preconditions || '',
+        steps: textToStepsHtml(tc.steps || ''),
+        testData: tc.testData || '',
+        expectedResult: tc.expectedResult || '',
+        actualResult: '',
+        typeTest: tc.typeTest || 'Positive',
+        status: 'Open',
+        executionDate: '',
+        customFields: {},
+        fileId,
+        createdAt: nowISO()
+      });
+    });
+    App.saveTestcases();
+    ActivityLog.record('tc_ai_generate', `${this.ui.staged.length} Test Case digenerate via AI (TestForge)`);
+    Toast.show(`${this.ui.staged.length} Test Case berhasil disimpan.`, 'success');
+    this.close();
+    TestCaseModule.render();
+  }
 };
 
 document.addEventListener('DOMContentLoaded', () => {
