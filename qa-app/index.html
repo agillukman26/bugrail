@@ -302,7 +302,8 @@
                     </button>
                   </div>
                 </div>
-                <button class="btn sm primary" id="tcAddBtn">
+                <button class="btn sm" type="button" id="tcAiGenerateBtn">✨ Generate (AI)</button>
+          <button class="btn sm primary" id="tcAddBtn">
                   + Test Case
                 </button>
               </div>
@@ -974,6 +975,17 @@
                 <option>Positive</option>
               </select>
             </div>
+
+<!-- ============ MODAL: TestForge AI Generate ============ -->
+<div class="modal-overlay" id="tfModalOverlay">
+  <div class="modal lg">
+    <div class="modal-header">
+      <h2 id="tfModalTitle">Generate Test Case (AI)</h2>
+      <button class="close-x" data-close="tfModalOverlay">✕</button>
+    </div>
+    <div id="tfBody"></div>
+  </div>
+</div>
             <div class="field">
               <label>Status</label>
               <select name="status">
@@ -1247,73 +1259,53 @@
       <span class="text-faint">Memuat aplikasi...</span>
     </div>
 
-    <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-    <script src="js/utils.js?v=8"></script>
-    <script src="js/app.js?v=8"></script>
-    <script src="js/auth.js?v=8"></script>
-    <script src="js/dashboard.js?v=8"></script>
-    <script src="js/testcase.js?v=8"></script>
-    <script src="js/bugreport.js?v=8"></script>
-    <script src="js/summary.js?v=8"></script>
-    <script src="js/import.js?v=8"></script>
-    <script src="js/export.js?v=8"></script>
-    <script src="js/settings.js?v=8"></script>
-    <script src="js/masterstatus.js?v=8"></script>
-    <script src="js/usermanagement.js?v=8"></script>
-    <script>
-      // Generic modal close (X button / Cancel buttons) + quick-add wiring.
-      document.querySelectorAll("[data-close]").forEach((btn) => {
-        btn.addEventListener("click", () =>
-          document.getElementById(btn.dataset.close).classList.remove("active"),
-        );
-      });
-      document.querySelectorAll(".modal-overlay").forEach((ov) => {
-        ov.addEventListener("click", (e) => {
-          if (e.target === ov) ov.classList.remove("active");
-        });
-      });
-      document
-        .getElementById("tcAddBtn")
-        .addEventListener("click", () => TestCaseModule.openForm());
-      document
-        .getElementById("tcEmptyAddBtn")
-        .addEventListener("click", () => TestCaseModule.openForm());
-      document
-        .getElementById("tcExportExcelBtn")
-        .addEventListener("click", () => TestCaseModule.exportExcel());
-      document
-        .getElementById("tcExportCsvBtn")
-        .addEventListener("click", () => TestCaseModule.exportCSV());
-      document
-        .getElementById("bugAddBtn")
-        .addEventListener("click", () => BugReportModule.openForm());
-      document
-        .getElementById("bugEmptyAddBtn")
-        .addEventListener("click", () => BugReportModule.openForm());
-      document
-        .getElementById("bugExportExcelBtn")
-        .addEventListener("click", () => BugReportModule.exportExcel());
-      document
-        .getElementById("bugExportCsvBtn")
-        .addEventListener("click", () => BugReportModule.exportCSV());
-      document.getElementById("globalFab").addEventListener("click", () => {
-        document.getElementById("fabWrap").classList.toggle("open");
-      });
-      document.getElementById("fabAddTc").addEventListener("click", () => {
-        document.getElementById("fabWrap").classList.remove("open");
-        TestCaseModule.openForm();
-      });
-      document.getElementById("fabAddBug").addEventListener("click", () => {
-        document.getElementById("fabWrap").classList.remove("open");
-        BugReportModule.openForm();
-      });
-      document.addEventListener("click", (e) => {
-        const wrap = document.getElementById("fabWrap");
-        if (wrap.classList.contains("open") && !wrap.contains(e.target))
-          wrap.classList.remove("open");
-      });
-      // loadingOverlay is hidden by auth.js once Storage.hydrate() (MySQL fetch) resolves.
-    </script>
-  </body>
+<!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
+<script src="js/utils.js?v=16"></script>
+<script src="js/app.js?v=16"></script>
+<script src="js/auth.js?v=16"></script>
+<script src="js/dashboard.js?v=16"></script>
+<script src="js/testcase.js?v=16"></script>
+<script src="js/testforge.js?v=1"></script>
+<script src="js/bugreport.js?v=16"></script>
+<script src="js/summary.js?v=16"></script>
+<script src="js/import.js?v=16"></script>
+<script src="js/export.js?v=16"></script>
+<script src="js/settings.js?v=16"></script>
+<script src="js/masterstatus.js?v=16"></script>
+<script src="js/usermanagement.js?v=16"></script>
+<script>
+  // Generic modal close (X button / Cancel buttons) + quick-add wiring.
+  document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => document.getElementById(btn.dataset.close).classList.remove('active'));
+  });
+  document.querySelectorAll('.modal-overlay').forEach(ov => {
+    ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('active'); });
+  });
+  document.getElementById('tcAddBtn').addEventListener('click', () => TestCaseModule.openForm());
+  document.getElementById('tcEmptyAddBtn').addEventListener('click', () => TestCaseModule.openForm());
+  document.getElementById('tcExportExcelBtn').addEventListener('click', () => TestCaseModule.exportExcel());
+  document.getElementById('tcExportCsvBtn').addEventListener('click', () => TestCaseModule.exportCSV());
+  document.getElementById('bugAddBtn').addEventListener('click', () => BugReportModule.openForm());
+  document.getElementById('bugEmptyAddBtn').addEventListener('click', () => BugReportModule.openForm());
+  document.getElementById('bugExportExcelBtn').addEventListener('click', () => BugReportModule.exportExcel());
+  document.getElementById('bugExportCsvBtn').addEventListener('click', () => BugReportModule.exportCSV());
+  document.getElementById('globalFab')?.addEventListener('click', () => {
+    document.getElementById('fabWrap').classList.toggle('open');
+  });
+  document.getElementById('fabAddTc').addEventListener('click', () => {
+    document.getElementById('fabWrap').classList.remove('open');
+    TestCaseModule.openForm();
+  });
+  document.getElementById('fabAddBug').addEventListener('click', () => {
+    document.getElementById('fabWrap').classList.remove('open');
+    BugReportModule.openForm();
+  });
+  document.addEventListener('click', e => {
+    const wrap = document.getElementById('fabWrap');
+    if (wrap.classList.contains('open') && !wrap.contains(e.target)) wrap.classList.remove('open');
+  });
+  // loadingOverlay is hidden by auth.js once Storage.hydrate() (MySQL fetch) resolves.
+</script>
+</body>
 </html>
 <
