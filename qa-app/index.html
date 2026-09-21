@@ -180,6 +180,7 @@
             </div>
           </div>
           <button class="btn sm" type="button" id="tcTranslateFileBtn" title="Translate semua test case di file ini (ID⇄EN)">🌐 Translate</button>
+          <button class="btn sm" type="button" id="tcAiGenerateBtn">✨ Generate (AI)</button>
           <button class="btn sm primary" id="tcAddBtn">+ Test Case</button>
         </div>
 
@@ -559,6 +560,17 @@
   </div>
 </div>
 
+<!-- ============ MODAL: TestForge AI Generate ============ -->
+<div class="modal-overlay" id="tfModalOverlay">
+  <div class="modal lg">
+    <div class="modal-header">
+      <h2 id="tfModalTitle">Generate Test Case (AI)</h2>
+      <button class="close-x" data-close="tfModalOverlay">✕</button>
+    </div>
+    <div id="tfBody"></div>
+  </div>
+</div>
+
 <!-- ============ MODAL: Import Test Case ============ -->
 <div class="modal-overlay" id="tcImportModalOverlay">
   <div class="modal">
@@ -868,6 +880,7 @@
 <script src="js/auth.js?v=16"></script>
 <script src="js/dashboard.js?v=16"></script>
 <script src="js/testcase.js?v=16"></script>
+<script src="js/testforge.js?v=1"></script>
 <script src="js/bugreport.js?v=16"></script>
 <script src="js/summary.js?v=16"></script>
 <script src="js/import.js?v=16"></script>
