@@ -70,16 +70,16 @@ const TestForgeModule = {
 
     let sourceHtml = '';
     if (this.ui.mode === 'brs') {
-      sourceHtml = `<textarea id="tfContentInput" rows="8" placeholder="Paste BRS text di sini...">${this.ui.content}</textarea>`;
+      sourceHtml = `<textarea id="tfContentInput" rows="8" placeholder="Paste BRS text di sini...">${escapeHtml(this.ui.content)}</textarea>`;
     } else if (this.ui.mode === 'text') {
-      sourceHtml = `<textarea id="tfContentInput" rows="8" placeholder="Jelaskan fitur/skenario yang mau di-generate...">${this.ui.content}</textarea>`;
+      sourceHtml = `<textarea id="tfContentInput" rows="8" placeholder="Jelaskan fitur/skenario yang mau di-generate...">${escapeHtml(this.ui.content)}</textarea>`;
     } else {
       const previews = this.ui.images.map((img, i) => `
-        <div class="tf-thumb"><img src="${img}"><button type="button" class="tf-thumb-remove" data-remove-img="${i}">✕</button></div>`).join('');
+        <div class="tf-thumb"><img src="${escapeHtml(img)}"><button type="button" class="tf-thumb-remove" data-remove-img="${i}">✕</button></div>`).join('');
       sourceHtml = `
         <input type="file" id="tfImageInput" accept="image/*" multiple>
         <div class="tf-thumb-row">${previews}</div>
-        <textarea id="tfContentInput" rows="3" placeholder="Instruksi tambahan (opsional)...">${this.ui.content}</textarea>`;
+        <textarea id="tfContentInput" rows="3" placeholder="Instruksi tambahan (opsional)...">${escapeHtml(this.ui.content)}</textarea>`;
     }
 
     return `
@@ -109,7 +109,7 @@ const TestForgeModule = {
         ${fieldKeys.map(key => `
           <div class="field">
             <label>${TESTFORGE_FIELDS.find(f => f.key === key).label}</label>
-            <textarea data-staged-field="${i}:${key}" rows="${key === 'steps' || key === 'testCase' ? 3 : 1}">${tc[key] || ''}</textarea>
+            <textarea data-staged-field="${i}:${key}" rows="${key === 'steps' || key === 'testCase' ? 3 : 1}">${escapeHtml(tc[key] || '')}</textarea>
           </div>`).join('')}
       </div>`).join('');
     return `
@@ -146,11 +146,13 @@ const TestForgeModule = {
       if (imageInput) imageInput.addEventListener('change', async () => {
         const files = Array.from(imageInput.files || []);
         for (const file of files) {
+          if (this.ui.images.length >= 5) { Toast.show('Maksimal 5 screenshot per generate.', 'error'); break; }
           const dataUrl = await new Promise(resolve => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
             reader.readAsDataURL(file);
           });
+          if (dataUrl.length > 4 * 1024 * 1024) { Toast.show('Ukuran screenshot terlalu besar (maks ~4MB).', 'error'); continue; }
           this.ui.images.push(dataUrl);
         }
         this.render();
@@ -233,7 +235,9 @@ const TestForgeModule = {
         scenario: tc.scenario || '',
         testCase: tc.testCase || '',
         preconditions: tc.preconditions || '',
-        steps: textToStepsHtml(tc.steps || ''),
+        // AI-sourced text is untrusted; neutralize < > so textToStepsHtml's
+        // "already HTML" passthrough (utils.js) never treats it as real HTML.
+        steps: textToStepsHtml(String(tc.steps || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')),
         testData: tc.testData || '',
         expectedResult: tc.expectedResult || '',
         actualResult: '',

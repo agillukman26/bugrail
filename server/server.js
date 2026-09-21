@@ -53,6 +53,19 @@ app.put('/api/kv/:key', async (req, res) => {
 
 const VALID_FIELDS = ['module', 'roleUser', 'scenario', 'testCase', 'preconditions', 'steps', 'testData', 'expectedResult', 'typeTest'];
 
+// ponytail: fixed-window per-IP limiter, in-memory only (resets on restart,
+// not shared across instances) — fine for a single-process internal tool.
+const TESTFORGE_RATE_LIMIT = 10;
+const TESTFORGE_RATE_WINDOW_MS = 5 * 60 * 1000;
+const testForgeHits = new Map(); // ip -> [timestamps]
+function isTestForgeRateLimited(ip){
+  const now = Date.now();
+  const hits = (testForgeHits.get(ip) || []).filter(t => now - t < TESTFORGE_RATE_WINDOW_MS);
+  hits.push(now);
+  testForgeHits.set(ip, hits);
+  return hits.length > TESTFORGE_RATE_LIMIT;
+}
+
 function buildTestForgePrompt(mode, content, fields, module){
   const fieldList = fields.join(', ');
   const moduleHint = module ? `The module/feature under test is "${module}".` : '';
@@ -69,6 +82,9 @@ ${mode !== 'screenshot' ? `Content:\n${content}` : (content ? `Additional instru
 
 app.post('/api/testforge/generate', async (req, res) => {
   try {
+    if (isTestForgeRateLimited(req.ip)) {
+      return res.status(429).json({ error: 'Too many requests, coba lagi nanti.' });
+    }
     const { mode, content, images, fields, module } = req.body || {};
     if (!['brs', 'screenshot', 'text'].includes(mode)) {
       return res.status(400).json({ error: 'Invalid mode' });
@@ -82,6 +98,9 @@ app.post('/api/testforge/generate', async (req, res) => {
     }
     if (mode === 'screenshot' && (!Array.isArray(images) || !images.length)) {
       return res.status(400).json({ error: 'At least one image is required for screenshot mode' });
+    }
+    if (mode === 'screenshot' && images.length > 5) {
+      return res.status(400).json({ error: 'Maksimal 5 screenshot per generate.' });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -97,17 +116,17 @@ app.post('/api/testforge/generate', async (req, res) => {
     }
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify({ contents: [{ parts }] })
       }
     );
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error('Gemini API error', geminiRes.status, errText);
-      return res.status(502).json({ error: 'AI provider error', raw: errText });
+      return res.status(502).json({ error: 'AI provider error' });
     }
     const geminiJson = await geminiRes.json();
     const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
