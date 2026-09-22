@@ -157,7 +157,7 @@ app.post('/api/testforge/generate', async (req, res) => {
     if (isTestForgeRateLimited(req.ip)) {
       return res.status(429).json({ error: 'Too many requests, coba lagi nanti.' });
     }
-    const { mode, content, images, fields, module } = req.body || {};
+    const { mode, content, images, fields, module, apiKey: bodyApiKey } = req.body || {};
     if (!['brs', 'screenshot', 'text'].includes(mode)) {
       return res.status(400).json({ error: 'Invalid mode' });
     }
@@ -175,8 +175,8 @@ app.post('/api/testforge/generate', async (req, res) => {
       return res.status(400).json({ error: 'Maksimal 5 screenshot per generate.' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured on server' });
+    const apiKey = (typeof bodyApiKey === 'string' && bodyApiKey.trim()) || process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY belum diisi. Isi di halaman Settings atau .env server.' });
 
     const promptText = buildTestForgePrompt(mode, content, cleanFields, module);
     const parts = [{ text: promptText }];

@@ -187,7 +187,8 @@ const TestForgeModule = {
           mode: this.ui.mode,
           content: this.ui.content,
           images: this.ui.mode === 'screenshot' ? this.ui.images : undefined,
-          fields: Array.from(this.ui.fields)
+          fields: Array.from(this.ui.fields),
+          apiKey: App.state.settings.geminiApiKey || undefined
         })
       });
       const data = await res.json();

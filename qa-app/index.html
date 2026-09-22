@@ -454,41 +454,21 @@
         <div id="sumBody"></div>
       </section>
 
-          <!-- ============ IMPORT & EXPORT ============ -->
-          <section class="page" id="page-importexport">
-            <div class="section-label">Import</div>
-            <div class="card" style="margin-bottom: 16px">
-              <div class="card-head">
-                <h3>Import Test Case</h3>
-                <span class="hint">Format: .xlsx atau .csv</span>
-              </div>
-              <p class="text-dim" style="font-size: 13px">
-                Kolom yang didukung:
-                <b
-                  >Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test
-                  Step, Test Data, Type Test, Expected Result</b
-                >. Test Case ID boleh dikosongkan — sistem akan generate
-                otomatis (prefix 3 huruf dari Module).
-              </p>
-              <div class="dropzone" id="importDropzone">
-                <div style="font-size: 28px">⇩</div>
-                <div>
-                  <b>Drag &amp; drop</b> file di sini, atau klik untuk memilih
-                  file
-                </div>
-                <input
-                  type="file"
-                  id="importFileInput"
-                  accept=".xlsx,.xls,.csv"
-                  hidden
-                />
-              </div>
-              <div style="margin-top: 14px">
-                <button class="btn sm" id="importTemplateBtn">
-                  ⇩ Download Template CSV
-                </button>
-              </div>
-            </div>
+      <!-- ============ IMPORT & EXPORT ============ -->
+      <section class="page" id="page-importexport">
+        <div class="section-label">Import</div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-head"><h3>Import Test Case</h3><span class="hint">Format: .xlsx atau .csv</span></div>
+          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result</b>. Test Case ID boleh dikosongkan — sistem akan generate otomatis (prefix 3 huruf dari Module).</p>
+          <div class="dropzone" id="importDropzone">
+            <div style="font-size:28px;">⇩</div>
+            <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
+            <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" hidden>
+          </div>
+          <div style="margin-top:14px;">
+            <button class="btn sm" id="importTemplateBtn">⇩ Download Template CSV</button>
+          </div>
+        </div>
 
             <div class="section-label">Export</div>
             <div class="grid grid-2col" style="margin-bottom: 16px">
@@ -549,65 +529,46 @@
             </div>
           </section>
 
-          <!-- ============ SETTINGS ============ -->
-          <section class="page" id="page-settings">
-            <div class="grid grid-2col">
-              <div class="card">
-                <div class="card-head"><h3>Tampilan</h3></div>
-                <div class="field">
-                  <label>Tema</label>
-                  <select id="settThemeSelect">
-                    <option value="light">Light Mode</option>
-                    <option value="dark">Dark Mode</option>
-                  </select>
-                </div>
-                <div class="section-label">Keyboard Shortcut</div>
-                <p style="font-size: 13px">
-                  <span class="kbd">/</span> fokus ke search &nbsp;
-                  <span class="kbd">N</span> tambah item baru &nbsp;
-                  <span class="kbd">Ctrl</span>+<span class="kbd">S</span>
-                  konfirmasi autosave
-                </p>
-              </div>
-              <div class="card">
-                <div class="card-head"><h3>Data</h3></div>
-                <p style="font-size: 13px">
-                  Test Case: <b id="settTcCount">0</b> &nbsp;|&nbsp; Bug Report:
-                  <b id="settBugCount">0</b>
-                </p>
-                <p
-                  class="text-faint"
-                  id="settStorageUsage"
-                  style="font-size: 12.5px"
-                ></p>
-                <button class="btn sm danger" id="settClearBtn">
-                  🗑 Hapus Semua Data
-                </button>
-              </div>
+      <!-- ============ SETTINGS ============ -->
+      <section class="page" id="page-settings">
+        <div class="grid grid-2col">
+          <div class="card">
+            <div class="card-head"><h3>Tampilan</h3></div>
+            <div class="field">
+              <label>Tema</label>
+              <select id="settThemeSelect">
+                <option value="light">Light Mode</option>
+                <option value="dark">Dark Mode</option>
+              </select>
             </div>
-            <div class="card" style="margin-top: 16px">
-              <div class="card-head">
-                <h3>Custom Fields Test Case</h3>
-                <span class="hint">Sesuaikan kolom per project</span>
-              </div>
-              <p class="text-dim" style="font-size: 13px">
-                Tambah field tambahan di form Test Case, misalnya untuk template
-                project yang beda dari default.
-              </p>
-              <div id="settCustomFieldList" style="margin-bottom: 10px"></div>
-              <div class="gap-8">
-                <input
-                  type="text"
-                  id="settCustomFieldInput"
-                  placeholder="Nama field baru, misal: Test Environment"
-                  style="flex: 1"
-                />
-                <button class="btn sm" id="settCustomFieldAddBtn">
-                  + Tambah Field
-                </button>
-              </div>
-            </div>
-          </section>
+            <div class="section-label">Keyboard Shortcut</div>
+            <p style="font-size:13px;"><span class="kbd">/</span> fokus ke search &nbsp; <span class="kbd">N</span> tambah item baru &nbsp; <span class="kbd">Ctrl</span>+<span class="kbd">S</span> konfirmasi autosave</p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Data</h3></div>
+            <p style="font-size:13px;">Test Case: <b id="settTcCount">0</b> &nbsp;|&nbsp; Bug Report: <b id="settBugCount">0</b></p>
+            <p class="text-faint" id="settStorageUsage" style="font-size:12.5px;"></p>
+            <button class="btn sm danger" id="settClearBtn">🗑 Hapus Semua Data</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div class="card-head"><h3>TestForge AI</h3><span class="hint">API Key untuk generate test case otomatis</span></div>
+          <p class="text-dim" style="font-size:13px;">Isi API Key Gemini (gratis) dari <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Tersimpan untuk seluruh workspace.</p>
+          <div class="gap-8">
+            <input type="password" id="settGeminiKeyInput" placeholder="Masukkan Gemini API Key" style="flex:1;">
+            <button class="btn sm" id="settGeminiKeySaveBtn">Simpan</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div class="card-head"><h3>Custom Fields Test Case</h3><span class="hint">Sesuaikan kolom per project</span></div>
+          <p class="text-dim" style="font-size:13px;">Tambah field tambahan di form Test Case, misalnya untuk template project yang beda dari default.</p>
+          <div id="settCustomFieldList" style="margin-bottom:10px;"></div>
+          <div class="gap-8">
+            <input type="text" id="settCustomFieldInput" placeholder="Nama field baru, misal: Test Environment" style="flex:1;">
+            <button class="btn sm" id="settCustomFieldAddBtn">+ Tambah Field</button>
+          </div>
+        </div>
+      </section>
 
       <!-- ============ MASTER: STATUS BUG REPORT ============ -->
       <section class="page" id="page-masterstatus">
