@@ -152,8 +152,12 @@ body.pre-auth .login-overlay{display:block; min-height:100vh; background:var(--b
   .login-card{padding:26px 20px;}
 }
 
-.tc-file-card{cursor:pointer; transition:box-shadow .15s, transform .15s;}
-.tc-file-card:hover{box-shadow:var(--shadow-m); transform:translateY(-1px); border-color:var(--primary);}
+.tc-file-card{cursor:pointer; transition:box-shadow .15s, border-color .15s;}
+/* No transform here on purpose: a transformed ancestor becomes the containing
+   block for any position:fixed descendant, which breaks the kebab menu
+   (.action-menu-list) positioning math (computed in viewport coordinates)
+   right when the card is hovered to click it. */
+.tc-file-card:hover{box-shadow:var(--shadow-m); border-color:var(--primary);}
 
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -166,7 +170,7 @@ body{
 }
 button, input, select, textarea{font-family:inherit; color:inherit;}
 a{color:var(--primary); text-decoration:none;}
-::selection{background:var(--primary-soft);}
+::selection{background:var(--primary); color:#fff;}
 :focus-visible{outline:2px solid var(--primary); outline-offset:2px;}
 
 /* Scrollbar */
@@ -450,6 +454,8 @@ table.data-table tbody tr:last-child td{border-bottom:none;}
 .toolbar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
 .toolbar .spacer{flex:1;}
 .filter-select{border:1px solid var(--border); background:var(--surface); border-radius:var(--radius-s); padding:8px 10px; font-size:12.5px; font-weight:600;}
+input[type="date"].filter-select{min-width:130px; color-scheme:light dark; cursor:pointer;}
+input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:pointer;}
 .search-box{display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-s); padding:8px 11px; min-width:220px;}
 .search-box input{border:none; outline:none; background:transparent; font-size:13px; width:100%;}
 
@@ -496,10 +502,21 @@ table.data-table tbody tr:last-child td{border-bottom:none;}
 .close-x{background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-faint); line-height:1;}
 
 .confirm-modal .modal{max-width:400px; text-align:center;}
+.checklist-modal .modal{max-width:380px; text-align:left;}
+.checklist-dialog-list{max-height:260px; overflow-y:auto; overflow-x:hidden; margin-bottom:14px; border:1px solid var(--border); border-radius:var(--radius-s);}
+.checklist-dialog-item{display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box; padding:10px 12px; font-size:13.5px; text-align:left; cursor:pointer; border-bottom:1px solid var(--border);}
+/* .field input (padding/border/background/width:100%) leaks onto this
+   checkbox since it's nested inside a .field — reset it back to plain. */
+.checklist-dialog-item input[type=checkbox]{
+  flex:none; width:16px; height:16px; padding:0; margin:0; border:none; background:none;
+}
+.checklist-dialog-item span{flex:1; min-width:0; text-align:left; overflow-wrap:break-word;}
+.checklist-dialog-item:last-child{border-bottom:none;}
+.checklist-dialog-item:hover{background:var(--surface-alt);}
 .confirm-modal .icon-warn{width:46px; height:46px; border-radius:50%; background:var(--status-failed-bg); color:var(--status-failed); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:22px;}
 
 /* ============ TOAST ============ */
-.toast-stack{position:fixed; right:20px; bottom:20px; z-index:200; display:flex; flex-direction:column; gap:10px; align-items:flex-end;}
+.toast-stack{position:fixed; right:20px; top:20px; z-index:200; display:flex; flex-direction:column; gap:10px; align-items:flex-end;}
 .toast{
   background:var(--text); color:var(--bg); border-radius:var(--radius-s); padding:12px 16px;
   box-shadow:var(--shadow-m); font-size:13px; font-weight:600; display:flex; align-items:center; gap:10px;
@@ -629,6 +646,11 @@ table.data-table tbody tr:last-child td{border-bottom:none;}
 }
 .dropdown.open .dropdown-panel{display:flex;}
 .dropdown-panel .filter-select{width:100%;}
+.dropdown-panel.filter-panel{min-width:230px; gap:12px;}
+.filter-field{display:flex; flex-direction:column; gap:5px;}
+.filter-field label{font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em;}
+.filter-panel-footer{border-top:1px solid var(--border); margin-top:2px; padding-top:10px;}
+.filter-panel-footer .btn{width:100%; justify-content:center;}
 .dropdown-item{
   background:none; border:none; text-align:left; padding:8px 10px; border-radius:var(--radius-s);
   font-size:13px; font-weight:600; color:var(--text); cursor:pointer; white-space:nowrap;
@@ -672,7 +694,8 @@ table.data-table tbody tr:last-child td{border-bottom:none;}
 .action-menu.open .action-menu-list{display:flex;}
 .action-menu-list button{display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:none; padding:7px 10px; border-radius:6px; font-size:13px; cursor:pointer; color:var(--text);}
 .action-menu-list button:hover{background:var(--surface-alt);}
-.action-menu-list button.danger{color:var(--status-failed);}
+.action-menu-list button.danger{color:var(--status-failed); border-top:1px solid var(--border); margin-top:2px; padding-top:9px; border-radius:0 0 6px 6px;}
+.action-menu-list button.danger:hover{background:var(--status-failed-bg);}
 .col-hidden{display:none;}
 
 /* ============ VIEW TOGGLE (Table/Board) ============ */

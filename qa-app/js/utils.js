@@ -11,7 +11,8 @@ const STORAGE_KEYS = {
   FILES: 'qa_files', // Test Case grouping ("file"/folder)
   SETTINGS: 'qa_settings',
   COUNTERS: 'qa_counters',
-  TRASH: 'qa_trash' // holds last deleted item(s) for Undo
+  TRASH: 'qa_trash', // holds last deleted item(s) for Undo
+  ACTIVITY_LOG: 'qa_activity_log' // audit trail: login/logout + CRUD, capped at 1000 entries
 };
 
 /* ---------- MySQL-backed storage (via server/), with a localStorage
@@ -66,7 +67,12 @@ const Storage = {
     try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ console.error('Storage.set: localStorage write failed', key, e); }
     fetch(`${API_BASE}/kv/${key}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': Auth.role() || '',
+        'x-workspace': Auth.currentWorkspaceId() || '',
+        'x-can-share': Auth.can('testcase_fileShare') ? '1' : '0'
+      },
       body: JSON.stringify({ value })
     }).then(() => { this.serverOnline = true; })
       .catch(e => {
@@ -156,6 +162,17 @@ const Toast = {
   }
 };
 
+/* Close a dialog on backdrop click — but only when the click actually
+   started AND ended on the backdrop. A plain `click` listener alone closes
+   the modal if the user drags to select text inside it and the drag ends
+   up releasing the mouse outside (over the backdrop), silently discarding
+   whatever they'd typed. */
+function bindBackdropClose(overlay, onClose){
+  let downOnBackdrop = false;
+  overlay.addEventListener('mousedown', e => { downOnBackdrop = e.target === overlay; });
+  overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) onClose(); });
+}
+
 /* ---------- Confirm dialog (returns a Promise<boolean>) ---------- */
 function confirmDialog(title, message, confirmLabel = 'Hapus'){
   return new Promise(resolve => {
@@ -174,7 +191,7 @@ function confirmDialog(title, message, confirmLabel = 'Hapus'){
     document.body.appendChild(overlay);
     overlay.querySelector('#cancelConfirm').onclick = () => { overlay.remove(); resolve(false); };
     overlay.querySelector('#okConfirm').onclick = () => { overlay.remove(); resolve(true); };
-    overlay.addEventListener('click', e => { if(e.target === overlay){ overlay.remove(); resolve(false); } });
+    bindBackdropClose(overlay, () => { overlay.remove(); resolve(false); });
   });
 }
 
@@ -219,7 +236,138 @@ function promptDialog(title, placeholder = '', defaultValue = '', confirmLabel =
     overlay.querySelector('#cancelPrompt').onclick = () => close(null);
     overlay.querySelector('#okPrompt').onclick = submit;
     input.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submit(); } });
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- New-file dialog for Admin (name + target workspace) ----------
+   workspaces: [{ id, name }]. Returns Promise<{name, workspaceId}|null>. */
+function fileCreateDialog(workspaces){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal active';
+    overlay.innerHTML = `
+      <div class="modal" style="text-align:left;">
+        <h2 style="margin:0 0 14px;">File Baru</h2>
+        <div class="field">
+          <label>Nama File</label>
+          <input type="text" id="fileCreateName" placeholder="misal: Sprint 12">
+          <p class="combobox-error" id="fileCreateError" style="display:none;"></p>
+        </div>
+        <div class="field">
+          <label>Workspace</label>
+          <select id="fileCreateWorkspace">
+            <option value="">(Semua / Shared)</option>
+            ${workspaces.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-footer" style="justify-content:center;">
+          <button class="btn" id="cancelFileCreate">Batal</button>
+          <button class="btn primary" id="okFileCreate">Buat File</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const nameInput = overlay.querySelector('#fileCreateName');
+    const wsSelect = overlay.querySelector('#fileCreateWorkspace');
+    const errorEl = overlay.querySelector('#fileCreateError');
+    nameInput.focus();
+    const close = (value) => { overlay.remove(); resolve(value); };
+    const submit = () => {
+      const name = nameInput.value.trim();
+      if (!name){ errorEl.textContent = 'Nama file wajib diisi.'; errorEl.style.display = 'block'; nameInput.classList.add('input-invalid'); return; }
+      close({ name, workspaceId: wsSelect.value || null });
+    };
+    nameInput.addEventListener('input', () => { errorEl.style.display = 'none'; nameInput.classList.remove('input-invalid'); });
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submit(); } });
+    overlay.querySelector('#cancelFileCreate').onclick = () => close(null);
+    overlay.querySelector('#okFileCreate').onclick = submit;
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- File edit dialog: rename + share in one modal ----------
+   Returns Promise<{name, sharedWith}|null>. The sharing section is only
+   rendered when `canShare` is true — otherwise sharedWith passes through
+   unchanged (rename-only, e.g. a workspace member editing their own file
+   without share permission, or a legacy/shared file with no single owner). */
+function fileEditDialog(file, canShare, workspaces){
+  return new Promise(resolve => {
+    const shared = new Set(file.sharedWith || []);
+    const others = canShare ? workspaces.filter(w => w.id !== file.workspaceId) : [];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal active';
+    overlay.innerHTML = `
+      <div class="modal" style="text-align:left; max-width:380px;">
+        <h2 style="margin:0 0 14px;">Edit File</h2>
+        <div class="field">
+          <label>Nama File</label>
+          <input type="text" id="fileEditName" value="${escapeHtml(file.name)}">
+          <p class="combobox-error" id="fileEditError" style="display:none;"></p>
+        </div>
+        ${canShare ? `
+        <div class="field" style="margin-bottom:0;">
+          <label>Share ke Workspace</label>
+          <div class="checklist-dialog-list" style="margin-bottom:0;">
+            ${others.length ? others.map(w => `
+              <label class="checklist-dialog-item">
+                <input type="checkbox" class="checkbox" data-share-id="${escapeHtml(w.id)}" ${shared.has(w.id) ? 'checked' : ''}>
+                <span>${escapeHtml(w.name)}</span>
+              </label>`).join('') : `<p class="text-faint" style="font-size:13px; padding:8px 0; margin:0;">Belum ada workspace lain.</p>`}
+          </div>
+        </div>` : ''}
+        <div class="modal-footer" style="justify-content:center;">
+          <button class="btn" id="cancelFileEdit">Batal</button>
+          <button class="btn primary" id="okFileEdit">Simpan</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const nameInput = overlay.querySelector('#fileEditName');
+    const errorEl = overlay.querySelector('#fileEditError');
+    nameInput.focus(); nameInput.select();
+    const close = (value) => { overlay.remove(); resolve(value); };
+    nameInput.addEventListener('input', () => { errorEl.style.display = 'none'; nameInput.classList.remove('input-invalid'); });
+    overlay.querySelector('#cancelFileEdit').onclick = () => close(null);
+    overlay.querySelector('#okFileEdit').onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name){ errorEl.textContent = 'Nama file wajib diisi.'; errorEl.style.display = 'block'; nameInput.classList.add('input-invalid'); return; }
+      const sharedWith = canShare
+        ? [...overlay.querySelectorAll('[data-share-id]:checked')].map(el => el.dataset.shareId)
+        : (file.sharedWith || []);
+      close({ name, sharedWith });
+    };
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- Checklist dialog (returns a Promise<string[]|null>) ----------
+   options: [{ id, label, checked }] */
+function checklistDialog(title, options, confirmLabel = 'Simpan'){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay checklist-modal active';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2 style="margin:0 0 14px;">${escapeHtml(title)}</h2>
+        <div class="checklist-dialog-list">
+          ${options.length ? options.map(o => `
+            <label class="checklist-dialog-item">
+              <input type="checkbox" class="checkbox" data-share-id="${escapeHtml(o.id)}" ${o.checked ? 'checked' : ''}>
+              <span>${escapeHtml(o.label)}</span>
+            </label>`).join('') : `<p class="text-faint" style="font-size:13px; padding:8px 0;">Belum ada workspace lain.</p>`}
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="cancelChecklist">Batal</button>
+          <button class="btn primary" id="okChecklist">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = (value) => { overlay.remove(); resolve(value); };
+    overlay.querySelector('#cancelChecklist').onclick = () => close(null);
+    overlay.querySelector('#okChecklist').onclick = () => {
+      const ids = [...overlay.querySelectorAll('[data-share-id]:checked')].map(el => el.dataset.shareId);
+      close(ids);
+    };
+    bindBackdropClose(overlay, () => close(null));
   });
 }
 

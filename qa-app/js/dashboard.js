@@ -73,7 +73,7 @@ const Dashboard = {
             <div class="sum-mini-bar"><span style="width:100%;"></span></div>
           </div>
           <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
-            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Rata-rata Waktu Resolusi</span></div>
+            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Pengerjaan Developer</span></div>
             <span class="sum-card-value">${formatDuration(resStats.avgHours)}</span>
             <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>

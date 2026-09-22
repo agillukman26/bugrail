@@ -11,7 +11,7 @@ const Auth = {
   EMAIL_KEY: 'qa_email',
   WORKSPACE_KEY: 'qa_workspace',
   DEFAULT_USERS: [
-    { email: 'admin@bugrail.local', password: 'admin123', role: 'admin' }
+    { email: 'admin@bugrail.local', password: 'sama', role: 'admin' }
   ],
 
   /* Seed roles — after first load these live in settings.roles and are
@@ -39,6 +39,8 @@ const Auth = {
     { key: 'testcase_read', label: 'Test Case — Lihat' },
     { key: 'testcase_update', label: 'Test Case — Edit' },
     { key: 'testcase_delete', label: 'Test Case — Hapus' },
+    { key: 'testcase_fileShare', label: 'Test Case — Share File antar Workspace' },
+    { key: 'activitylog', label: 'Activity Log (lihat)' },
     { key: 'bugreport_fileCreate', label: 'Bug Report — Buat File' },
     { key: 'bugreport_create', label: 'Bug Report — Tambah' },
     { key: 'bugreport_read', label: 'Bug Report — Lihat' },
@@ -56,7 +58,7 @@ const Auth = {
      goes through this matrix (see can(), hardcoded to avoid self-lockout). */
   DEFAULT_ROLE_PERMISSIONS: {
     pm_ba: { dashboard: true, summary: true, bugreport_read: true, bugreport_updateStatusPriority: true },
-    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true },
+    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true },
     qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true },
     user_umum: { testcase_read: true, bugreport_read: true }
   },
@@ -95,11 +97,22 @@ const Auth = {
   },
 
   /* Files with no workspaceId are shared/visible to everyone (legacy data,
-     or created by a workspace-less admin). Admin always sees every file. */
+     or created by a workspace-less admin). A file can also be explicitly
+     shared with other workspaces via `sharedWith` (array of workspace ids),
+     set through shareFile() — gated by the testcase_fileShare permission.
+     Admin always sees every file. */
   visibleFiles(allFiles){
     if (this.isAdmin()) return allFiles;
     const ws = this.currentWorkspaceId();
-    return allFiles.filter(f => !f.workspaceId || f.workspaceId === ws);
+    return allFiles.filter(f => !f.workspaceId || f.workspaceId === ws || (f.sharedWith || []).includes(ws));
+  },
+
+  /* Share/unshare a file with other workspaces. Only the owning workspace
+     (or admin) may change sharing, and only with testcase_fileShare permission. */
+  canShareFile(file){
+    if (this.isAdmin()) return this.can('testcase_fileShare');
+    if (!file.workspaceId) return false; // shared/legacy files have no single owner
+    return file.workspaceId === this.currentWorkspaceId() && this.can('testcase_fileShare');
   },
 
   deleteWorkspace(id){
@@ -196,6 +209,7 @@ const Auth = {
     else sessionStorage.removeItem(this.WORKSPACE_KEY);
     document.body.classList.remove('pre-auth');
     App.init();
+    ActivityLog.record('login', `${email} login sebagai ${role}`);
     this.renderBadge();
   },
 
@@ -213,6 +227,7 @@ const Auth = {
   },
 
   logout(){
+    ActivityLog.record('logout', `${this.currentEmail()} logout`);
     sessionStorage.removeItem(this.ROLE_KEY);
     sessionStorage.removeItem(this.EMAIL_KEY);
     sessionStorage.removeItem(this.WORKSPACE_KEY);

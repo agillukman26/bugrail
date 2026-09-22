@@ -107,6 +107,7 @@ const UserManagementModule = {
       user.role = role;
       user.workspaceId = workspaceId;
       App.saveSettings();
+      ActivityLog.record('user_update', `User ${email} diperbarui`);
       this.resetUserForm();
       this.closeUserModal();
       this.renderUsers();
@@ -120,6 +121,7 @@ const UserManagementModule = {
 
     users.push({ email, password, role, workspaceId });
     App.saveSettings();
+    ActivityLog.record('user_create', `User ${email} dibuat`);
     this.resetUserForm();
     this.closeUserModal();
     this.renderUsers();
@@ -140,6 +142,7 @@ const UserManagementModule = {
     if (!ok) return;
     App.state.settings.users = users.filter(u => u !== user);
     App.saveSettings();
+    ActivityLog.record('user_delete', `User ${user.email} dihapus`);
     if (this.editingEmail === user.email) this.resetUserForm();
     this.renderUsers();
     Toast.show('User dihapus.', 'info');
@@ -268,12 +271,14 @@ const UserManagementModule = {
       if (!result.ok){ Toast.show(result.error, 'error'); return; }
       App.state.settings.rolePermissions[this.roleEditingValue] = perms;
       App.saveSettings();
+      ActivityLog.record('role_update', `Role "${label}" diperbarui`);
       Toast.show('Role diperbarui.', 'success');
     } else {
       const result = Auth.addRole(label, code);
       if (!result.ok){ Toast.show(result.error, 'error'); return; }
       App.state.settings.rolePermissions[result.value] = perms;
       App.saveSettings();
+      ActivityLog.record('role_create', `Role "${label}" dibuat`);
       Toast.show('Role dibuat.', 'success');
     }
     this.closeRoleModal();
@@ -289,6 +294,7 @@ const UserManagementModule = {
     if (!ok) return;
     const result = Auth.deleteRole(value);
     if (!result.ok){ Toast.show(result.error, 'error'); return; }
+    ActivityLog.record('role_delete', `Role "${role.label}" dihapus`);
     this.renderRolePermissions();
     document.getElementById('settUserRole').innerHTML = Auth.ROLES.map(r => `<option value="${r.value}">${escapeHtml(r.label)}</option>`).join('');
     Toast.show('Role dihapus.', 'info');
@@ -355,11 +361,13 @@ const UserManagementModule = {
 
   saveWorkspace(){
     const name = document.getElementById('workspaceFormName').value;
+    const wasEditing = !!this.workspaceEditingId;
     const result = this.workspaceEditingId
       ? Auth.updateWorkspace(this.workspaceEditingId, name)
       : Auth.addWorkspace(name);
     if (!result.ok){ Toast.show(result.error, 'error'); return; }
-    Toast.show(this.workspaceEditingId ? 'Workspace diperbarui.' : 'Workspace dibuat.', 'success');
+    ActivityLog.record(wasEditing ? 'workspace_update' : 'workspace_create', `Workspace "${name}" ${wasEditing ? 'diperbarui' : 'dibuat'}`);
+    Toast.show(wasEditing ? 'Workspace diperbarui.' : 'Workspace dibuat.', 'success');
     this.closeWorkspaceModal();
     this.resetWorkspaceForm();
     this.renderWorkspaces();
@@ -373,6 +381,7 @@ const UserManagementModule = {
     if (!ok) return;
     const result = Auth.deleteWorkspace(id);
     if (!result.ok){ Toast.show(result.error, 'error'); return; }
+    ActivityLog.record('workspace_delete', `Workspace "${ws.name}" dihapus`);
     this.renderWorkspaces();
     this.refreshWorkspaceSelect();
     Toast.show('Workspace dihapus.', 'info');

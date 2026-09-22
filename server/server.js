@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { getDb } = require('./db');
 
-const ALLOWED_KEYS = new Set(['qa_testcases', 'qa_bugs', 'qa_files', 'qa_settings', 'qa_counters']);
+const ALLOWED_KEYS = new Set(['qa_testcases', 'qa_bugs', 'qa_files', 'qa_settings', 'qa_counters', 'qa_activity_log']);
 
 const app = express();
 app.use(cors());
@@ -34,7 +34,79 @@ app.get('/api/kv/:key', async (req, res) => {
   }
 });
 
-app.put('/api/kv/:key', async (req, res) => {
+// Client identifies itself via these headers (see Storage.set in qa-app/js/utils.js).
+// Not real authentication (no signature/session check) — but stops a non-admin
+// client from writing files it doesn't own into another workspace, or granting
+// cross-workspace sharing without the share permission, even if the frontend
+// UI gating is bypassed.
+function readClientAuth(req){
+  return {
+    role: req.get('x-role') || '',
+    workspace: req.get('x-workspace') || '',
+    canShare: req.get('x-can-share') === '1'
+  };
+}
+
+// The client always PUTs the WHOLE qa_files array (every workspace's files,
+// since Auth.visibleFiles() lets a non-admin see files shared into their
+// workspace too) — so validation must diff against what's already stored
+// and only police what THIS write actually changed, not every row in the
+// array, or a non-admin would get 403'd just for having someone else's
+// file present-but-untouched in their payload.
+function sameSharedWith(a, b){
+  const x = (a || []).slice().sort();
+  const y = (b || []).slice().sort();
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+async function validateFilesWrite(req, res, next){
+  const { role, workspace, canShare } = readClientAuth(req);
+  if (role === 'admin') return next();
+  const files = Array.isArray(req.body.value) ? req.body.value : [];
+  try {
+    const db = await getDb();
+    const row = await db.collection('kv_store').findOne({ _id: 'qa_files' });
+    const oldFiles = (row && Array.isArray(row.value)) ? row.value : [];
+    const oldById = new Map(oldFiles.map(f => [f.id, f]));
+    const newById = new Map(files.map(f => [f.id, f]));
+
+    for (const f of files){
+      const old = oldById.get(f.id);
+      if (!old){
+        // New file: must be created in own workspace (or shared/legacy).
+        if (f.workspaceId && f.workspaceId !== workspace){
+          return res.status(403).json({ error: `Tidak berhak membuat file di workspace lain: ${f.id}` });
+        }
+        continue;
+      }
+      const changed = old.name !== f.name || old.workspaceId !== f.workspaceId || !sameSharedWith(old.sharedWith, f.sharedWith);
+      if (!changed) continue;
+      // Editing an existing file: only its owning workspace (or legacy/shared) may touch it.
+      if (old.workspaceId && old.workspaceId !== workspace){
+        return res.status(403).json({ error: `Tidak berhak mengubah file milik workspace lain: ${f.id}` });
+      }
+      if (!sameSharedWith(old.sharedWith, f.sharedWith) && !canShare){
+        return res.status(403).json({ error: `Tidak punya izin share file: ${f.id}` });
+      }
+    }
+    for (const old of oldFiles){
+      if (newById.has(old.id)) continue;
+      // Deleting a file: only its owning workspace (or legacy/shared) may delete it.
+      if (old.workspaceId && old.workspaceId !== workspace){
+        return res.status(403).json({ error: `Tidak berhak menghapus file milik workspace lain: ${old.id}` });
+      }
+    }
+    next();
+  } catch (err) {
+    console.error('validateFilesWrite failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+}
+
+app.put('/api/kv/:key', async (req, res, next) => {
+  if (req.params.key === 'qa_files') return validateFilesWrite(req, res, next);
+  next();
+}, async (req, res) => {
   const { key } = req.params;
   if (!ALLOWED_KEYS.has(key)) return res.status(400).json({ error: `Unknown key: ${key}` });
   try {
