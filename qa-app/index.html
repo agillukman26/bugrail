@@ -419,6 +419,14 @@
           </div>
         </div>
         <div class="card" style="margin-top:16px;">
+          <div class="card-head"><h3>TestForge AI</h3><span class="hint">API Key untuk generate test case otomatis</span></div>
+          <p class="text-dim" style="font-size:13px;">Isi API Key Gemini (gratis) dari <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Tersimpan untuk seluruh workspace.</p>
+          <div class="gap-8">
+            <input type="password" id="settGeminiKeyInput" placeholder="Masukkan Gemini API Key" style="flex:1;">
+            <button class="btn sm" id="settGeminiKeySaveBtn">Simpan</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
           <div class="card-head"><h3>Custom Fields Test Case</h3><span class="hint">Sesuaikan kolom per project</span></div>
           <p class="text-dim" style="font-size:13px;">Tambah field tambahan di form Test Case, misalnya untuk template project yang beda dari default.</p>
           <div id="settCustomFieldList" style="margin-bottom:10px;"></div>

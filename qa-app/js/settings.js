@@ -16,7 +16,15 @@ const SettingsModule = {
     document.getElementById('settStorageUsage').textContent = `${kb} KB data (disimpan di MySQL server)`;
     document.getElementById('settTcCount').textContent = App.state.testcases.length;
     document.getElementById('settBugCount').textContent = App.state.bugs.length;
+    document.getElementById('settGeminiKeyInput').value = App.state.settings.geminiApiKey || '';
     this.renderCustomFields();
+  },
+
+  saveGeminiKey(){
+    const input = document.getElementById('settGeminiKeyInput');
+    App.state.settings.geminiApiKey = input.value.trim();
+    App.saveSettings();
+    Toast.show('API Key TestForge disimpan.', 'success');
   },
 
   renderCustomFields(){
@@ -69,6 +77,7 @@ const SettingsModule = {
       App.saveSettings(); App.applyTheme();
     });
     document.getElementById('settCustomFieldAddBtn').addEventListener('click', () => this.addCustomField());
+    document.getElementById('settGeminiKeySaveBtn').addEventListener('click', () => this.saveGeminiKey());
   }
 };
 
