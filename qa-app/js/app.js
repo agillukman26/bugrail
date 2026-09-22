@@ -11,6 +11,7 @@ const App = {
     testcases: [],
     bugs: [],
     files: [],
+    activityLog: [],
     settings: { theme: 'light', customFieldDefs: [] },
     currentPage: 'dashboard'
   },
@@ -20,6 +21,7 @@ const App = {
     this.state.testcases = Storage.get(STORAGE_KEYS.TESTCASES, []);
     this.state.bugs = Storage.get(STORAGE_KEYS.BUGS, []);
     this.state.files = Storage.get(STORAGE_KEYS.FILES, []);
+    this.state.activityLog = Storage.get(STORAGE_KEYS.ACTIVITY_LOG, []);
     this.state.settings = Storage.get(STORAGE_KEYS.SETTINGS, { theme: 'light', customFieldDefs: [] });
     this.state.testcases.forEach(t => { if (t.status === 'Not Run') t.status = 'Open'; });
     this.ensureRoles();
@@ -61,6 +63,7 @@ const App = {
   saveTestcases(){ Storage.set(STORAGE_KEYS.TESTCASES, this.state.testcases); this.onDataChanged(); },
   saveBugs(){ Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); },
   saveFiles(){ Storage.set(STORAGE_KEYS.FILES, this.state.files); },
+  saveActivityLog(){ Storage.set(STORAGE_KEYS.ACTIVITY_LOG, this.state.activityLog); },
   saveSettings(){ Storage.set(STORAGE_KEYS.SETTINGS, this.state.settings); },
 
   /* Called after any mutation — keeps sidebar counts & any open
@@ -74,6 +77,7 @@ const App = {
   /* ---- Routing (simple show/hide, no history API needed offline) ---- */
   goTo(page){
     this.state.currentPage = page;
+    sessionStorage.setItem(this.LAST_PAGE_KEY, page);
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
     const pageEl = document.getElementById(`page-${page}`);
@@ -100,7 +104,8 @@ const App = {
       usermanagement: ['User Management', 'Kelola akun login (Admin & User)'],
       rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
       settings: ['Settings', 'Preferensi aplikasi & data'],
-      masterstatus: ['Status Bug Report', 'Master data status bug report']
+      masterstatus: ['Status Bug Report', 'Master data status bug report'],
+      activitylog: ['Activity Log', 'Riwayat aktivitas user dari login sampai logout']
     };
     const [t, s] = titles[page] || [page, ''];
     document.getElementById('pageTitle').textContent = t;
@@ -112,6 +117,7 @@ const App = {
     if (page === 'bugreport') BugReportModule.render();
     if (page === 'summary') Summary.render();
     if (page === 'masterstatus') MasterStatusModule.render();
+    if (page === 'activitylog') ActivityLogModule.render();
 
     document.getElementById('sidebar').classList.remove('open');
   },
@@ -132,6 +138,7 @@ const App = {
     setVisible('rolepermission', Auth.isAdmin());
     setVisible('workspace', Auth.isAdmin());
     setVisible('settings', Auth.can('settings'));
+    setVisible('activitylog', Auth.can('activitylog'));
     const masterGroup = document.getElementById('navGroupMaster');
     if (masterGroup) masterGroup.style.display = Auth.can('master') ? '' : 'none';
     const userMgmtGroup = document.getElementById('navGroupUserManagement');
@@ -233,13 +240,33 @@ const App = {
       }
     });
 
-    this.goTo(this.firstAllowedPage());
+    this.goTo(this.restorePage());
   },
 
+  /* Pages gated purely by Auth.can(); rolepermission/workspace (admin-only)
+     and importexport (no gate) are checked separately in canAccessPage(). */
+  PAGE_PERMISSIONS: {
+    dashboard: 'dashboard', summary: 'summary', testcase: 'testcase_read',
+    bugreport: 'bugreport_read', masterstatus: 'master', usermanagement: 'usermanagement', settings: 'settings',
+    activitylog: 'activitylog'
+  },
+  canAccessPage(page){
+    if (page === 'rolepermission' || page === 'workspace') return Auth.isAdmin();
+    if (page === 'importexport') return true;
+    const perm = this.PAGE_PERMISSIONS[page];
+    return perm ? Auth.can(perm) : false;
+  },
   firstAllowedPage(){
-    const order = [['dashboard','dashboard'],['summary','summary'],['testcase','testcase_read'],['bugreport','bugreport_read']];
-    const found = order.find(([, perm]) => Auth.can(perm));
-    return found ? found[0] : 'dashboard';
+    const order = ['dashboard','summary','testcase','bugreport'];
+    return order.find(p => this.canAccessPage(p)) || 'dashboard';
+  },
+  /* Reload lands back on whatever page the user had open (see goTo's
+     sessionStorage write below), falling back to the first allowed page
+     if that page no longer exists or the role can't access it anymore. */
+  LAST_PAGE_KEY: 'qa_last_page',
+  restorePage(){
+    const saved = sessionStorage.getItem(this.LAST_PAGE_KEY);
+    return (saved && document.getElementById(`page-${saved}`) && this.canAccessPage(saved)) ? saved : this.firstAllowedPage();
   }
 };
 

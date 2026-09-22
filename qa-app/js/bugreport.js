@@ -27,7 +27,8 @@ const BugReportModule = {
   ui: {
     search: '', filters: { module:'', severity:'', priority:'', status:'', tester:'' },
     sortKey: 'reportDate', sortDir: 'desc', page: 1, pageSize: 10,
-    selected: new Set(), editingId: null, activeFileId: null, view: 'table', detailId: null, chatTab: 'comment'
+    selected: new Set(), editingId: null, activeFileId: sessionStorage.getItem('qa_bug_active_file') || null,
+    view: 'table', detailId: null, chatTab: 'comment'
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
@@ -40,21 +41,60 @@ const BugReportModule = {
   /* ---- files (grouping, shared with Test Case module) ---- */
   files(){ return Auth.visibleFiles(App.state.files); },
   fileCount(fileId){ return App.state.bugs.filter(b => b.fileId === fileId).length; },
-  createFile(name){
+  createFile(name, workspaceId = Auth.currentWorkspaceId()){
     name = (name || '').trim();
     if (!name) return;
-    const file = { id: 'FILE-' + Date.now(), name, workspaceId: Auth.currentWorkspaceId(), createdAt: nowISO() };
+    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdAt: nowISO() };
     App.state.files.push(file);
     App.saveFiles();
+    ActivityLog.record('bug_file_create', `File Bug Report "${name}" dibuat`);
     this.renderFileList();
     Toast.show(`File "${name}" dibuat.`, 'success');
   },
+  async editFile(fileId){
+    const file = this.files().find(f => f.id === fileId);
+    if (!file) return;
+    const canShare = Auth.canShareFile(file);
+    const result = await fileEditDialog(file, canShare, Auth.workspaces());
+    if (!result) return;
+    const oldName = file.name;
+    const oldShared = (file.sharedWith || []).slice().sort();
+    file.name = result.name;
+    if (canShare) file.sharedWith = result.sharedWith;
+    App.saveFiles();
+    if (oldName !== file.name) ActivityLog.record('bug_file_rename', `File Bug Report "${oldName}" diganti nama jadi "${file.name}"`);
+    const newShared = (file.sharedWith || []).slice().sort();
+    if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
+      ActivityLog.record('bug_file_share', newShared.length
+        ? `File Bug Report "${file.name}" dibagikan ke ${newShared.length} workspace`
+        : `Sharing File Bug Report "${file.name}" dihapus`);
+    }
+    this.render();
+    Toast.show(`File "${file.name}" diperbarui.`, 'success');
+  },
+  async deleteFile(fileId){
+    if (!Auth.isAdmin()){ Toast.show('Hanya Admin yang dapat menghapus file.', 'error'); return; }
+    const file = this.files().find(f => f.id === fileId);
+    const count = this.fileCount(fileId);
+    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${count} bug di dalamnya akan dihapus permanen.`, 'Hapus');
+    if (!ok) return;
+    App.state.files = App.state.files.filter(f => f.id !== fileId);
+    App.state.bugs = App.state.bugs.filter(b => b.fileId !== fileId);
+    App.saveFiles();
+    App.saveBugs();
+    ActivityLog.record('bug_file_delete', `File Bug Report "${file.name}" dihapus`);
+    if (this.ui.activeFileId === fileId){ this.ui.activeFileId = null; sessionStorage.removeItem('qa_bug_active_file'); }
+    this.render();
+    Toast.show(`File "${file.name}" dihapus.`, 'info');
+  },
   openFile(fileId){
     this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
+    sessionStorage.setItem('qa_bug_active_file', fileId);
     this.render();
   },
   backToFiles(){
     this.ui.activeFileId = null; this.ui.search = '';
+    sessionStorage.removeItem('qa_bug_active_file');
     const globalSearch = document.getElementById('globalSearch');
     if (globalSearch) globalSearch.value = '';
     this.render();
@@ -89,6 +129,13 @@ const BugReportModule = {
   uniqueValues(field){ return [...new Set(this.all().map(b => b[field]).filter(Boolean))].sort(); },
 
   render(){
+    // Reload lands with activeFileId restored from sessionStorage — if that
+    // file was deleted, or its workspace no longer shares it with this user,
+    // fall back to the file list instead of showing a stuck empty detail view.
+    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)){
+      this.ui.activeFileId = null;
+      sessionStorage.removeItem('qa_bug_active_file');
+    }
     const searching = !!this.ui.search;
     const inFile = !!this.ui.activeFileId || searching;
     document.getElementById('bugFileListView').style.display = inFile ? 'none' : 'block';
@@ -179,13 +226,35 @@ const BugReportModule = {
       wrap.innerHTML = `<p class="text-faint" style="font-size:13.5px; grid-column:1/-1; padding:24px 0; text-align:center;">📁 Belum ada file. Buat file di halaman Test Case.</p>`;
       return;
     }
-    wrap.innerHTML = files.map(f => `
+    wrap.innerHTML = files.map(f => {
+      const shareCount = (f.sharedWith || []).length;
+      return `
       <div class="card tc-file-card" data-open="${f.id}">
-        <h3 style="margin:0; font-size:14.5px; cursor:pointer;">📁 ${escapeHtml(f.name)}</h3>
-        <p class="text-faint" style="font-size:12.5px; margin:8px 0 0;">${this.fileCount(f.id)} bug</p>
+        <div class="flex-between">
+          <h3 style="margin:0; font-size:14.5px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
+          ${actionMenu(`
+            <button data-act="edit" data-id="${f.id}">✎ Edit</button>
+            <button class="danger" data-act="del" data-id="${f.id}">🗑 Hapus</button>
+          `)}
+        </div>
+        <div class="flex-between" style="margin-top:8px;">
+          <p class="text-faint" style="font-size:12.5px; margin:0;">${this.fileCount(f.id)} bug</p>
+          ${shareCount ? `<span class="badge st-notrun" title="Dibagikan ke ${shareCount} workspace">📤 ${shareCount}</span>` : ''}
+        </div>
       </div>
-    `).join('');
-    wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => this.openFile(el.dataset.open)));
+    `;
+    }).join('');
+    wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', (e) => {
+      if (e.target.closest('.action-menu')) return;
+      this.openFile(el.dataset.open);
+    }));
+    wrap.querySelectorAll('.action-menu button[data-act]').forEach(btn => {
+      btn.onclick = async () => {
+        const { act, id } = btn.dataset;
+        if (act === 'edit') this.editFile(id);
+        if (act === 'del') this.deleteFile(id);
+      };
+    });
   },
 
   renderBoard(rows){
@@ -239,9 +308,11 @@ const BugReportModule = {
     if (!Auth.can('bugreport_board')) return;
     const bug = this.all().find(b => b.id === id);
     if (!bug || bug.status === status) return;
+    const from = bug.status;
     this.logActivity(bug, bug.status, status);
     bug.status = status;
     App.saveBugs();
+    ActivityLog.record('bugreport_update', `Bug ${id} status diubah dari ${from} ke ${status} (board)`);
     this.render();
   },
 
@@ -383,6 +454,15 @@ const BugReportModule = {
     };
     build('bugFilterModule', 'module');
     build('bugFilterTester', 'tester');
+  },
+
+  resetFilters(){
+    this.ui.filters = { module:'', severity:'', priority:'', status:'', tester:'' };
+    this.ui.page = 1;
+    document.getElementById('bugFilterSeverity').value = '';
+    document.getElementById('bugFilterPriority').value = '';
+    document.getElementById('bugFilterStatus').value = '';
+    this.render();
   },
 
   renderPagination(totalPages){
@@ -553,10 +633,12 @@ const BugReportModule = {
       const prev = App.state.bugs[idx];
       if (prev.status !== data.status) this.logActivity(prev, prev.status, data.status);
       App.state.bugs[idx] = { ...prev, ...data };
+      ActivityLog.record('bugreport_update', `Bug ${this.ui.editingId} diperbarui`);
       Toast.show(`Bug ${this.ui.editingId} diperbarui.`, 'success');
     } else {
       const id = IdGen.next('BUG');
       App.state.bugs.push({ id, ...data, fileId: this.ui.activeFileId, reportDate: nowISO() });
+      ActivityLog.record('bugreport_create', `Bug ${id} dibuat`);
       Toast.show(`Bug ${id} dibuat.`, 'success');
     }
     App.saveBugs();
@@ -570,6 +652,7 @@ const BugReportModule = {
     if (!ok) return;
     const idx = App.state.bugs.findIndex(b => b.id === id);
     const removed = App.state.bugs.splice(idx,1)[0];
+    ActivityLog.record('bugreport_delete', `Bug ${id} dihapus`);
     App.saveBugs(); this.ui.selected.delete(id); this.render();
     Toast.show(`${id} dihapus.`, 'info', { undo: () => { App.state.bugs.splice(idx,0,removed); App.saveBugs(); this.render(); } });
   },
@@ -581,19 +664,23 @@ const BugReportModule = {
     if (!ok) return;
     const removed = App.state.bugs.filter(b => ids.includes(b.id));
     App.state.bugs = App.state.bugs.filter(b => !ids.includes(b.id));
+    ActivityLog.record('bugreport_delete', `${ids.length} bug dihapus (bulk)`);
     App.saveBugs(); this.ui.selected.clear(); this.render();
     Toast.show(`${ids.length} bug dihapus.`, 'info', { undo: () => { App.state.bugs.push(...removed); App.saveBugs(); this.render(); } });
   },
 
   bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status) return;
+    let changed = 0;
     App.state.bugs.forEach(b => {
       if (this.ui.selected.has(b.id) && b.status !== status){
         this.logActivity(b, b.status, status);
         b.status = status;
+        changed++;
       }
     });
     App.saveBugs(); this.render();
+    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)`);
     Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
   },
 
@@ -618,6 +705,7 @@ const BugReportModule = {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Bug Reports');
     XLSX.writeFile(wb, `BugReports_${todayISO()}.xlsx`);
+    ActivityLog.record('bugreport_export', `${rows.length} bug di-export ke Excel`);
     Toast.show('Export Excel Bug Report berhasil.', 'success');
   },
   exportCSV(){
@@ -631,6 +719,7 @@ const BugReportModule = {
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
     downloadBlob(arrayToCSV(this.filtered(), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
+    ActivityLog.record('bugreport_export', `${this.filtered().length} bug di-export ke CSV`);
     Toast.show('Export CSV Bug Report berhasil (siap import ke Google Spreadsheet).', 'success');
   },
 
@@ -665,6 +754,7 @@ const BugReportModule = {
         });
         App.ensureDefaultFile();
         App.saveBugs();
+        ActivityLog.record('bugreport_create', `${count} bug report di-import dari file`);
         this.render();
         Toast.show(`${count} bug report berhasil di-import.`, 'success');
       }catch(err){
@@ -735,8 +825,13 @@ const BugReportModule = {
   bindStaticEvents(){
     document.getElementById('bugBackToFilesBtn').addEventListener('click', () => this.backToFiles());
     document.getElementById('bugNewFileBtn').addEventListener('click', async () => {
-      const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
-      if (name) this.createFile(name);
+      if (Auth.isAdmin()){
+        const result = await fileCreateDialog(Auth.workspaces());
+        if (result) this.createFile(result.name, result.workspaceId);
+      } else {
+        const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
+        if (name) this.createFile(name);
+      }
     });
     document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
       el.addEventListener('click', () => {
@@ -768,6 +863,7 @@ const BugReportModule = {
         this.ui.filters[map[id]] = e.target.value; this.ui.page = 1; this.render();
       });
     });
+    document.getElementById('bugFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.querySelectorAll('#bugTable thead th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const key = th.dataset.key;

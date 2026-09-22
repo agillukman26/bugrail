@@ -32,41 +32,61 @@ const TestCaseModule = {
     selected: new Set(),
     editingId: null,
     executingId: null,
-    activeFileId: null
+    activeFileId: sessionStorage.getItem('qa_tc_active_file') || null
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
 
   /* ---- files (grouping) ---- */
   files(){ return Auth.visibleFiles(App.state.files); },
+  fileCounts(){
+    const counts = {};
+    App.state.testcases.forEach(t => { if (t.fileId) counts[t.fileId] = (counts[t.fileId] || 0) + 1; });
+    return counts;
+  },
   fileCount(fileId){ return App.state.testcases.filter(t => t.fileId === fileId).length; },
   openFile(fileId){
     this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
+    sessionStorage.setItem('qa_tc_active_file', fileId);
     this.render();
   },
   backToFiles(){
     this.ui.activeFileId = null; this.ui.search = '';
+    sessionStorage.removeItem('qa_tc_active_file');
     const globalSearch = document.getElementById('globalSearch');
     if (globalSearch) globalSearch.value = '';
     this.render();
   },
-  createFile(name){
+  createFile(name, workspaceId = Auth.currentWorkspaceId()){
     name = (name || '').trim();
     if (!name) return;
-    const file = { id: 'FILE-' + Date.now(), name, workspaceId: Auth.currentWorkspaceId(), createdAt: nowISO() };
+    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdAt: nowISO() };
     App.state.files.push(file);
     App.saveFiles();
+    ActivityLog.record('tc_file_create', `File Test Case "${name}" dibuat`);
     this.renderFileList();
     Toast.show(`File "${name}" dibuat.`, 'success');
   },
-  renameFile(fileId, name){
-    name = (name || '').trim();
-    if (!name) return;
+  async editFile(fileId){
     const file = this.files().find(f => f.id === fileId);
     if (!file) return;
-    file.name = name;
+    const canShare = Auth.canShareFile(file);
+    const result = await fileEditDialog(file, canShare, Auth.workspaces());
+    if (!result) return;
+    const oldName = file.name;
+    const oldShared = (file.sharedWith || []).slice().sort();
+    file.name = result.name;
+    if (canShare) file.sharedWith = result.sharedWith;
     App.saveFiles();
+    if (oldName !== file.name) ActivityLog.record('tc_file_rename', `File Test Case "${oldName}" diganti nama jadi "${file.name}"`);
+    const newShared = (file.sharedWith || []).slice().sort();
+    if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
+      ActivityLog.record('tc_file_share', newShared.length
+        ? `File Test Case "${file.name}" dibagikan ke ${newShared.length} workspace`
+        : `Sharing File Test Case "${file.name}" dihapus`);
+    }
     this.render();
+    Toast.show(`File "${file.name}" diperbarui.`, 'success');
   },
   async deleteFile(fileId){
     if (!Auth.isAdmin()){ Toast.show('Hanya Admin yang dapat menghapus file.', 'error'); return; }
@@ -78,6 +98,7 @@ const TestCaseModule = {
     App.state.testcases = App.state.testcases.filter(t => t.fileId !== fileId);
     App.saveFiles();
     App.saveTestcases();
+    ActivityLog.record('tc_file_delete', `File Test Case "${file.name}" dihapus`);
     if (this.ui.activeFileId === fileId) this.ui.activeFileId = null;
     this.render();
     Toast.show(`File "${file.name}" dihapus.`, 'info');
@@ -118,6 +139,13 @@ const TestCaseModule = {
 
   /* ---- render ---- */
   render(){
+    // Reload lands with activeFileId restored from sessionStorage — if that
+    // file was deleted, or its workspace no longer shares it with this user,
+    // fall back to the file list instead of showing a stuck empty detail view.
+    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)){
+      this.ui.activeFileId = null;
+      sessionStorage.removeItem('qa_tc_active_file');
+    }
     const searching = !!this.ui.search;
     const inFile = !!this.ui.activeFileId || searching;
     document.getElementById('tcFileListView').style.display = inFile ? 'none' : 'block';
@@ -204,29 +232,36 @@ const TestCaseModule = {
       wrap.innerHTML = `<p class="text-faint" style="font-size:13.5px; grid-column:1/-1; padding:24px 0; text-align:center;">📁 Belum ada file test case.<br>Ketik nama di kolom atas lalu klik <b>+ File Baru</b> untuk mulai.</p>`;
       return;
     }
-    wrap.innerHTML = files.map(f => `
+    const counts = this.fileCounts();
+    wrap.innerHTML = files.map(f => {
+      const shareCount = (f.sharedWith || []).length;
+      return `
       <div class="card tc-file-card" data-open="${f.id}">
         <div class="flex-between">
-          <h3 style="margin:0; font-size:14.5px; cursor:pointer;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
-          <div class="cell-actions">
-            <button class="btn sm ghost" data-rename="${f.id}" title="Rename">✎</button>
-            <button class="btn sm ghost" data-delfile="${f.id}" title="Hapus">🗑</button>
-          </div>
+          <h3 style="margin:0; font-size:14.5px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
+          ${actionMenu(`
+            <button data-act="edit" data-id="${f.id}">✎ Edit</button>
+            <button class="danger" data-act="del" data-id="${f.id}">🗑 Hapus</button>
+          `)}
         </div>
-        <p class="text-faint" style="font-size:12.5px; margin:8px 0 0;">${this.fileCount(f.id)} test case</p>
+        <div class="flex-between" style="margin-top:8px;">
+          <p class="text-faint" style="font-size:12.5px; margin:0;">${counts[f.id] || 0} test case</p>
+          ${shareCount ? `<span class="badge st-notrun" title="Dibagikan ke ${shareCount} workspace">📤 ${shareCount}</span>` : ''}
+        </div>
       </div>
-    `).join('');
-    wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => this.openFile(el.dataset.open)));
-    wrap.querySelectorAll('[data-rename]').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const file = files.find(f => f.id === btn.dataset.rename);
-      const name = await promptDialog('Rename File', 'Nama file', file.name, 'Simpan');
-      if (name) this.renameFile(file.id, name);
+    `;
+    }).join('');
+    wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', (e) => {
+      if (e.target.closest('.action-menu')) return;
+      this.openFile(el.dataset.open);
     }));
-    wrap.querySelectorAll('[data-delfile]').forEach(btn => btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.deleteFile(btn.dataset.delfile);
-    }));
+    wrap.querySelectorAll('.action-menu button[data-act]').forEach(btn => {
+      btn.onclick = async () => {
+        const { act, id } = btn.dataset;
+        if (act === 'edit') this.editFile(id);
+        if (act === 'del') this.deleteFile(id);
+      };
+    });
   },
 
   statusBadge(status){
@@ -242,6 +277,14 @@ const TestCaseModule = {
         this.uniqueValues(field).map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
     };
     build('tcFilterModule', 'module');
+  },
+
+  resetFilters(){
+    this.ui.filters = { module:'', typeTest:'', status:'' };
+    this.ui.page = 1;
+    document.getElementById('tcFilterTypeTest').value = '';
+    document.getElementById('tcFilterStatus').value = '';
+    this.render();
   },
 
   renderPagination(totalPages){
@@ -464,10 +507,12 @@ const TestCaseModule = {
     if (this.ui.editingId){
       const idx = App.state.testcases.findIndex(t => t.id === this.ui.editingId);
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
+      ActivityLog.record('testcase_update', `Test Case ${this.ui.editingId} diperbarui`);
       Toast.show(`Test case ${this.ui.editingId} diperbarui.`, 'success');
     } else {
       const id = IdGen.next(moduleAbbrev(data.module));
       App.state.testcases.push({ id, ...data, fileId: this.ui.activeFileId, createdAt: nowISO() });
+      ActivityLog.record('testcase_create', `Test Case ${id} dibuat`);
       Toast.show(`Test case ${id} dibuat.`, 'success');
     }
     App.saveTestcases();
@@ -529,10 +574,13 @@ const TestCaseModule = {
     e.preventDefault();
     const f = e.target;
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
+    const from = App.state.testcases[idx].status;
+    const id = App.state.testcases[idx].id;
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].status = f.status.value;
     App.state.testcases[idx].executionDate = todayISO();
     App.saveTestcases();
+    if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`);
     this.closeExecute();
     this.render();
     Toast.show(`Hasil eksekusi ${this.ui.executingId} disimpan.`, 'success');
@@ -554,6 +602,7 @@ const TestCaseModule = {
     if (!ok) return;
     const idx = App.state.testcases.findIndex(t => t.id === id);
     const removed = App.state.testcases.splice(idx, 1)[0];
+    ActivityLog.record('testcase_delete', `Test Case ${id} dihapus`);
     App.saveTestcases();
     this.ui.selected.delete(id);
     this.render();
@@ -569,6 +618,7 @@ const TestCaseModule = {
     if (!ok) return;
     const removed = App.state.testcases.filter(t => ids.includes(t.id));
     App.state.testcases = App.state.testcases.filter(t => !ids.includes(t.id));
+    ActivityLog.record('testcase_delete', `${ids.length} test case dihapus (bulk)`);
     App.saveTestcases();
     this.ui.selected.clear();
     this.render();
@@ -579,8 +629,10 @@ const TestCaseModule = {
 
   bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status || !Auth.can('testcase_update')) return;
-    App.state.testcases.forEach(t => { if (this.ui.selected.has(t.id)) t.status = status; });
+    let changed = 0;
+    App.state.testcases.forEach(t => { if (this.ui.selected.has(t.id) && t.status !== status){ t.status = status; changed++; } });
     App.saveTestcases();
+    if (changed) ActivityLog.record('testcase_update', `${changed} test case status diubah menjadi ${status} (bulk)`);
     this.render();
     Toast.show(`Status ${this.ui.selected.size} test case diubah menjadi ${status}.`, 'success');
   },
@@ -621,6 +673,7 @@ const TestCaseModule = {
         });
         App.ensureDefaultFile();
         App.saveTestcases();
+        ActivityLog.record('testcase_create', `${count} test case di-import dari file`);
         this.render();
         Toast.show(`${count} test case berhasil di-import.`, 'success');
       }catch(err){
@@ -652,14 +705,24 @@ const TestCaseModule = {
     return cols;
   },
 
-  /* Styled .xlsx: header fill, borders + wrap text on every cell, and a
-     dropdown (data validation) on the Type Test / Status columns. */
-  async exportExcel(){
-    const cols = this.exportColumns();
-    const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
+  /* Excel sheet name: max 31 chars, can't contain \ / ? * [ ] : ; dedup
+     with a numeric suffix if two modules sanitize to the same name. */
+  safeSheetName(name, used){
+    let base = String(name || 'Tanpa Module').replace(/[\\/?*[\]:]/g, '-').trim().slice(0, 31) || 'Module';
+    let candidate = base;
+    let n = 2;
+    while (used.has(candidate)){
+      const suffix = ` (${n++})`;
+      candidate = base.slice(0, 31 - suffix.length) + suffix;
+    }
+    used.add(candidate);
+    return candidate;
+  },
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Test Cases');
+  /* One styled sheet: header fill, borders + wrap text on every cell, and a
+     dropdown (data validation) on the Type Test / Status columns. */
+  buildSheet(wb, sheetName, cols, rows){
+    const ws = wb.addWorksheet(sheetName);
     ws.columns = cols.map(c => ({ header: c.label, key: c.key, width: c.width }));
 
     const headerRow = ws.getRow(1);
@@ -690,15 +753,36 @@ const TestCaseModule = {
     });
 
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+  },
+
+  /* One sheet per Module (respects current search/filter via this.filtered()). */
+  async exportExcel(){
+    const cols = this.exportColumns();
+    const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
+
+    const byModule = new Map();
+    rows.forEach(r => {
+      const key = r.module || 'Tanpa Module';
+      if (!byModule.has(key)) byModule.set(key, []);
+      byModule.get(key).push(r);
+    });
+
+    const wb = new ExcelJS.Workbook();
+    const usedNames = new Set();
+    byModule.forEach((moduleRows, moduleName) => {
+      this.buildSheet(wb, this.safeSheetName(moduleName, usedNames), cols, moduleRows);
+    });
 
     const buf = await wb.xlsx.writeBuffer();
     downloadBlob(buf, `TestCases_${todayISO()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    ActivityLog.record('testcase_export', `${rows.length} test case di-export ke Excel`);
     Toast.show('Export Excel Test Case berhasil.', 'success');
   },
   exportCSV(){
     const cols = this.exportColumns();
     const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
     downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');
+    ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     Toast.show('Export CSV Test Case berhasil (siap import ke Google Spreadsheet).', 'success');
   },
   printList(){
@@ -739,6 +823,7 @@ const TestCaseModule = {
         this.ui.filters[map[id]] = e.target.value; this.ui.page = 1; this.render();
       });
     });
+    document.getElementById('tcFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.querySelectorAll('#tcTable thead th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const key = th.dataset.key;
@@ -788,8 +873,13 @@ const TestCaseModule = {
     });
     document.getElementById('tcBackToFilesBtn').addEventListener('click', () => this.backToFiles());
     document.getElementById('tcNewFileBtn').addEventListener('click', async () => {
-      const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
-      if (name) this.createFile(name);
+      if (Auth.isAdmin()){
+        const result = await fileCreateDialog(Auth.workspaces());
+        if (result) this.createFile(result.name, result.workspaceId);
+      } else {
+        const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
+        if (name) this.createFile(name);
+      }
     });
   }
 };

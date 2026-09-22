@@ -138,7 +138,7 @@ const Summary = {
             <div class="sum-mini-bar"><span style="width:100%;"></span></div>
           </div>
           <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
-            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Rata-rata Waktu Resolusi</span></div>
+            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Pengerjaan Developer</span></div>
             <span class="sum-card-value">${formatDuration(resStats.avgHours)}</span>
             <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
@@ -499,6 +499,10 @@ const Summary = {
     });
     document.getElementById('sumDateFrom').addEventListener('change', e => { this.filters.dateFrom = e.target.value; this.render(); });
     document.getElementById('sumDateTo').addEventListener('change', e => { this.filters.dateTo = e.target.value; this.render(); });
+    ['sumDateFrom','sumDateTo'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('click', () => { if (el.showPicker) el.showPicker(); });
+    });
     document.getElementById('sumExportPdfBtn').addEventListener('click', () => this.exportPDF());
     document.getElementById('sumExportExcelBtn').addEventListener('click', () => this.exportExcel());
   }
