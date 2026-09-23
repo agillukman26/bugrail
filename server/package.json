@@ -4,7 +4,8 @@
   "description": "MongoDB-backed storage API for BugRail QA App",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "cors": "^2.8.5",
