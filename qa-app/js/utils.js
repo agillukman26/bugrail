@@ -6,12 +6,13 @@
    ========================================================== */
 
 const STORAGE_KEYS = {
-  TESTCASES: "qa_testcases",
-  BUGS: "qa_bugs",
-  FILES: "qa_files", // Test Case grouping ("file"/folder)
-  SETTINGS: "qa_settings",
-  COUNTERS: "qa_counters",
-  TRASH: "qa_trash", // holds last deleted item(s) for Undo
+  TESTCASES: 'qa_testcases',
+  BUGS: 'qa_bugs',
+  FILES: 'qa_files', // Test Case grouping ("file"/folder)
+  SETTINGS: 'qa_settings',
+  COUNTERS: 'qa_counters',
+  TRASH: 'qa_trash', // holds last deleted item(s) for Undo
+  ACTIVITY_LOG: 'qa_activity_log' // audit trail: login/logout + CRUD, capped at 1000 entries
 };
 
 /* ---------- MySQL-backed storage (via server/), with a localStorage
@@ -77,19 +78,17 @@ const Storage = {
       console.error("Storage.set: localStorage write failed", key, e);
     }
     fetch(`${API_BASE}/kv/${key}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value }),
-    })
-      .then(() => {
-        this.serverOnline = true;
-      })
-      .catch((e) => {
-        if (this.serverOnline)
-          Toast.show(
-            "Server database tidak terhubung, data disimpan lokal saja.",
-            "info",
-          );
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-role': Auth.role() || '',
+        'x-workspace': Auth.currentWorkspaceId() || '',
+        'x-can-share': Auth.can('testcase_fileShare') ? '1' : '0'
+      },
+      body: JSON.stringify({ value })
+    }).then(() => { this.serverOnline = true; })
+      .catch(e => {
+        if (this.serverOnline) Toast.show('Server database tidak terhubung, data disimpan lokal saja.', 'info');
         this.serverOnline = false;
         console.error(
           "Storage.set: MySQL sync failed, kept in localStorage",
@@ -187,6 +186,17 @@ const Toast = {
   },
 };
 
+/* Close a dialog on backdrop click — but only when the click actually
+   started AND ended on the backdrop. A plain `click` listener alone closes
+   the modal if the user drags to select text inside it and the drag ends
+   up releasing the mouse outside (over the backdrop), silently discarding
+   whatever they'd typed. */
+function bindBackdropClose(overlay, onClose){
+  let downOnBackdrop = false;
+  overlay.addEventListener('mousedown', e => { downOnBackdrop = e.target === overlay; });
+  overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) onClose(); });
+}
+
 /* ---------- Confirm dialog (returns a Promise<boolean>) ---------- */
 function confirmDialog(title, message, confirmLabel = "Hapus") {
   return new Promise((resolve) => {
@@ -203,20 +213,9 @@ function confirmDialog(title, message, confirmLabel = "Hapus") {
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    overlay.querySelector("#cancelConfirm").onclick = () => {
-      overlay.remove();
-      resolve(false);
-    };
-    overlay.querySelector("#okConfirm").onclick = () => {
-      overlay.remove();
-      resolve(true);
-    };
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) {
-        overlay.remove();
-        resolve(false);
-      }
-    });
+    overlay.querySelector('#cancelConfirm').onclick = () => { overlay.remove(); resolve(false); };
+    overlay.querySelector('#okConfirm').onclick = () => { overlay.remove(); resolve(true); };
+    bindBackdropClose(overlay, () => { overlay.remove(); resolve(false); });
   });
 }
 
@@ -270,21 +269,142 @@ function promptDialog(
       }
       close(value);
     };
-    input.addEventListener("input", () => {
-      errorEl.style.display = "none";
-      input.classList.remove("input-invalid");
-    });
-    overlay.querySelector("#cancelPrompt").onclick = () => close(null);
-    overlay.querySelector("#okPrompt").onclick = submit;
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        submit();
-      }
-    });
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close(null);
-    });
+    input.addEventListener('input', () => { errorEl.style.display = 'none'; input.classList.remove('input-invalid'); });
+    overlay.querySelector('#cancelPrompt').onclick = () => close(null);
+    overlay.querySelector('#okPrompt').onclick = submit;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submit(); } });
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- New-file dialog for Admin (name + target workspace) ----------
+   workspaces: [{ id, name }]. Returns Promise<{name, workspaceId}|null>. */
+function fileCreateDialog(workspaces){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal active';
+    overlay.innerHTML = `
+      <div class="modal" style="text-align:left;">
+        <h2 style="margin:0 0 14px;">File Baru</h2>
+        <div class="field">
+          <label>Nama File</label>
+          <input type="text" id="fileCreateName" placeholder="misal: Sprint 12">
+          <p class="combobox-error" id="fileCreateError" style="display:none;"></p>
+        </div>
+        <div class="field">
+          <label>Workspace</label>
+          <select id="fileCreateWorkspace">
+            <option value="">(Semua / Shared)</option>
+            ${workspaces.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-footer" style="justify-content:center;">
+          <button class="btn" id="cancelFileCreate">Batal</button>
+          <button class="btn primary" id="okFileCreate">Buat File</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const nameInput = overlay.querySelector('#fileCreateName');
+    const wsSelect = overlay.querySelector('#fileCreateWorkspace');
+    const errorEl = overlay.querySelector('#fileCreateError');
+    nameInput.focus();
+    const close = (value) => { overlay.remove(); resolve(value); };
+    const submit = () => {
+      const name = nameInput.value.trim();
+      if (!name){ errorEl.textContent = 'Nama file wajib diisi.'; errorEl.style.display = 'block'; nameInput.classList.add('input-invalid'); return; }
+      close({ name, workspaceId: wsSelect.value || null });
+    };
+    nameInput.addEventListener('input', () => { errorEl.style.display = 'none'; nameInput.classList.remove('input-invalid'); });
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); submit(); } });
+    overlay.querySelector('#cancelFileCreate').onclick = () => close(null);
+    overlay.querySelector('#okFileCreate').onclick = submit;
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- File edit dialog: rename + share in one modal ----------
+   Returns Promise<{name, sharedWith}|null>. The sharing section is only
+   rendered when `canShare` is true — otherwise sharedWith passes through
+   unchanged (rename-only, e.g. a workspace member editing their own file
+   without share permission, or a legacy/shared file with no single owner). */
+function fileEditDialog(file, canShare, workspaces){
+  return new Promise(resolve => {
+    const shared = new Set(file.sharedWith || []);
+    const others = canShare ? workspaces.filter(w => w.id !== file.workspaceId) : [];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal active';
+    overlay.innerHTML = `
+      <div class="modal" style="text-align:left; max-width:380px;">
+        <h2 style="margin:0 0 14px;">Edit File</h2>
+        <div class="field">
+          <label>Nama File</label>
+          <input type="text" id="fileEditName" value="${escapeHtml(file.name)}">
+          <p class="combobox-error" id="fileEditError" style="display:none;"></p>
+        </div>
+        ${canShare ? `
+        <div class="field" style="margin-bottom:0;">
+          <label>Share ke Workspace</label>
+          <div class="checklist-dialog-list" style="margin-bottom:0;">
+            ${others.length ? others.map(w => `
+              <label class="checklist-dialog-item">
+                <input type="checkbox" class="checkbox" data-share-id="${escapeHtml(w.id)}" ${shared.has(w.id) ? 'checked' : ''}>
+                <span>${escapeHtml(w.name)}</span>
+              </label>`).join('') : `<p class="text-faint" style="font-size:13px; padding:8px 0; margin:0;">Belum ada workspace lain.</p>`}
+          </div>
+        </div>` : ''}
+        <div class="modal-footer" style="justify-content:center;">
+          <button class="btn" id="cancelFileEdit">Batal</button>
+          <button class="btn primary" id="okFileEdit">Simpan</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const nameInput = overlay.querySelector('#fileEditName');
+    const errorEl = overlay.querySelector('#fileEditError');
+    nameInput.focus(); nameInput.select();
+    const close = (value) => { overlay.remove(); resolve(value); };
+    nameInput.addEventListener('input', () => { errorEl.style.display = 'none'; nameInput.classList.remove('input-invalid'); });
+    overlay.querySelector('#cancelFileEdit').onclick = () => close(null);
+    overlay.querySelector('#okFileEdit').onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name){ errorEl.textContent = 'Nama file wajib diisi.'; errorEl.style.display = 'block'; nameInput.classList.add('input-invalid'); return; }
+      const sharedWith = canShare
+        ? [...overlay.querySelectorAll('[data-share-id]:checked')].map(el => el.dataset.shareId)
+        : (file.sharedWith || []);
+      close({ name, sharedWith });
+    };
+    bindBackdropClose(overlay, () => close(null));
+  });
+}
+
+/* ---------- Checklist dialog (returns a Promise<string[]|null>) ----------
+   options: [{ id, label, checked }] */
+function checklistDialog(title, options, confirmLabel = 'Simpan'){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay checklist-modal active';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2 style="margin:0 0 14px;">${escapeHtml(title)}</h2>
+        <div class="checklist-dialog-list">
+          ${options.length ? options.map(o => `
+            <label class="checklist-dialog-item">
+              <input type="checkbox" class="checkbox" data-share-id="${escapeHtml(o.id)}" ${o.checked ? 'checked' : ''}>
+              <span>${escapeHtml(o.label)}</span>
+            </label>`).join('') : `<p class="text-faint" style="font-size:13px; padding:8px 0;">Belum ada workspace lain.</p>`}
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="cancelChecklist">Batal</button>
+          <button class="btn primary" id="okChecklist">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = (value) => { overlay.remove(); resolve(value); };
+    overlay.querySelector('#cancelChecklist').onclick = () => close(null);
+    overlay.querySelector('#okChecklist').onclick = () => {
+      const ids = [...overlay.querySelectorAll('[data-share-id]:checked')].map(el => el.dataset.shareId);
+      close(ids);
+    };
+    bindBackdropClose(overlay, () => close(null));
   });
 }
 
@@ -292,11 +412,137 @@ function promptDialog(
 function escapeHtml(str) {
   if (str === null || str === undefined) return "";
   return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* Dev team quality metric: how fast bugs go from reported (Open) to Closed,
+   based on the status-change activity log recorded in bugreport.js. Only
+   bugs currently Closed with a logged "-> Closed" transition count — bugs
+   without activity (imported/seeded data) can't be measured and are skipped. */
+function computeBugResolutionStats(bugs){
+  const durations = [];
+  (bugs || []).forEach(b => {
+    if (b.status !== 'Closed' || !b.reportDate) return;
+    const closedEntries = (b.activity || []).filter(a => a.to === 'Closed');
+    if (!closedEntries.length) return;
+    const ms = new Date(closedEntries[closedEntries.length - 1].at) - new Date(b.reportDate);
+    if (ms > 0) durations.push(ms);
+  });
+  const avgHours = durations.length ? (durations.reduce((a, b) => a + b, 0) / durations.length) / 3600000 : 0;
+  return { resolvedCount: durations.length, avgHours };
+}
+
+function formatDuration(hours){
+  if (!hours) return '-';
+  if (hours < 24) return `${hours.toFixed(1)} jam`;
+  return `${(hours / 24).toFixed(1)} hari`;
+}
+
+/* Turns a plain-text "Test Step" cell from an imported Excel/CSV file into the
+   HTML the Steps rich-text editor (Quill) expects. If most lines already start
+   with a number ("1.", "2)", ...), it becomes a real <ol> so imported steps
+   show up numbered without the user having to reformat them by hand. */
+function textToStepsHtml(raw){
+  const text = String(raw ?? '').trim();
+  if (!text) return '';
+  if (/<[a-z][\s\S]*>/i.test(text)) return text; // already HTML (e.g. re-imported export)
+  const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  const numberedRe = /^\d+[.\)]\s*/;
+  const numberedCount = lines.filter(l => numberedRe.test(l)).length;
+  if (numberedCount >= Math.ceil(lines.length * 0.6)){
+    return '<ol>' + lines.map(l => `<li>${escapeHtml(l.replace(numberedRe, ''))}</li>`).join('') + '</ol>';
+  }
+  return lines.map(l => `<p>${escapeHtml(l)}</p>`).join('');
+}
+
+function stripHtml(html){
+  const d = document.createElement('div');
+  d.innerHTML = html || '';
+  return d.textContent || '';
+}
+
+/* Reverse of textToStepsHtml — for export. Plain stripHtml() drops <ol>/<ul>
+   numbering (textContent has no idea it was a list), so a numbered Steps
+   field would export blank of numbers. Walk top-level <li>/<p>/<br> blocks
+   and re-number them as plain text lines instead. */
+function stepsHtmlToText(html){
+  if (!html) return '';
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  const lists = d.querySelectorAll('ol, ul');
+  lists.forEach(list => {
+    const ordered = list.tagName === 'OL';
+    [...list.children].forEach((li, i) => {
+      li.textContent = `${ordered ? `${i + 1}. ` : '- '}${li.textContent}`;
+    });
+  });
+  [...d.querySelectorAll('p, li, br')].forEach(el => el.after(document.createTextNode('\n')));
+  return (d.textContent || '').replace(/\n{2,}/g, '\n').trim();
+}
+
+/* Heuristic ID/EN detection via common stopword counting — good enough to
+   pick a translate direction without a paid language-detection API. */
+const ID_STOPWORDS = ['yang','dan','atau','tidak','untuk','dengan','adalah','ini','itu','pada','akan','dari','ke','di','sudah','belum','harus','bisa','dapat','maka'];
+const EN_STOPWORDS = ['the','and','or','not','for','with','is','are','this','that','on','will','from','to','in','already','must','can','should','then'];
+function detectLang(text){
+  const words = String(text || '').toLowerCase().split(/\W+/).filter(Boolean);
+  let idScore = 0, enScore = 0;
+  words.forEach(w => { if (ID_STOPWORDS.includes(w)) idScore++; if (EN_STOPWORDS.includes(w)) enScore++; });
+  return enScore > idScore ? 'en' : 'id';
+}
+
+/* Row action kebab menu: wraps a list of `<button data-...>` action items
+   (rendered exactly as before) behind a single "⋮" toggle so dense action
+   columns (Bug Report, Master Status, User Management, Role Permission,
+   Workspace) don't show every action inline. */
+function actionMenu(itemsHtml){
+  return `<div class="action-menu">
+    <button type="button" class="action-menu-btn" title="Aksi">⋮</button>
+    <div class="action-menu-list">${itemsHtml}</div>
+  </div>`;
+}
+
+function positionActionMenu(menu){
+  const btn = menu.querySelector('.action-menu-btn');
+  const list = menu.querySelector('.action-menu-list');
+  const r = btn.getBoundingClientRect();
+  list.style.top = `${r.bottom + 4}px`;
+  list.style.left = 'auto';
+  list.style.right = `${window.innerWidth - r.right}px`;
+  const listRect = list.getBoundingClientRect();
+  if (listRect.bottom > window.innerHeight){
+    list.style.top = `${r.top - listRect.height - 4}px`;
+  }
+}
+
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.action-menu-btn');
+  document.querySelectorAll('.action-menu.open').forEach(m => {
+    if (!btn || m !== btn.closest('.action-menu')) m.classList.remove('open');
+  });
+  if (btn){
+    const menu = btn.closest('.action-menu');
+    const wasOpen = menu.classList.contains('open');
+    menu.classList.toggle('open');
+    if (!wasOpen) positionActionMenu(menu);
+  } else if (e.target.closest('.action-menu-list')) {
+    document.querySelectorAll('.action-menu.open').forEach(m => m.classList.remove('open'));
+  }
+});
+window.addEventListener('scroll', () => {
+  document.querySelectorAll('.action-menu.open').forEach(m => m.classList.remove('open'));
+}, true);
+
+async function translateText(text, langpair){
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return '';
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${langpair}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Translate API error');
+  const data = await res.json();
+  return data?.responseData?.translatedText || trimmed;
 }
 
 function debounce(fn, wait = 250) {
@@ -307,15 +553,18 @@ function debounce(fn, wait = 250) {
   };
 }
 
-function formatDate(iso) {
-  if (!iso) return "-";
+function formatDate(iso){
+  if(!iso) return '-';
   const d = new Date(iso);
-  if (isNaN(d)) return iso;
-  return d.toLocaleDateString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  if(isNaN(d)) return iso;
+  return d.toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+function formatDateTime(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  if(isNaN(d)) return iso;
+  return d.toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 
 function todayISO() {

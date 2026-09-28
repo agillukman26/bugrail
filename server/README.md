@@ -16,6 +16,8 @@ living in one browser only.
    npm install
    ```
 3. Copy `.env.example` to `.env` and adjust `MONGO_URI`/`DB_NAME` if needed.
+   For the TestForge AI feature, also set `GEMINI_API_KEY` (free key at
+   https://aistudio.google.com/apikey).
 4. Start the API:
    ```
    npm start

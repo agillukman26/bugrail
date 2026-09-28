@@ -9,14 +9,165 @@
 const Auth = {
   ROLE_KEY: 'qa_role',
   EMAIL_KEY: 'qa_email',
+  WORKSPACE_KEY: 'qa_workspace',
   DEFAULT_USERS: [
-    { email: 'admin@bugrail.local', password: 'admin123', role: 'admin' }
+    { email: 'admin@bugrail.local', password: 'sama', role: 'admin' }
   ],
 
+  /* Seed roles — after first load these live in settings.roles and are
+     fully editable (add/edit/delete) from the Role Permission page.
+     'admin' is not stored here: it's a fixed, undeletable role (see isAdmin/can). */
+  DEFAULT_ROLES: [
+    { value: 'pm_ba', label: 'PM & BA' },
+    { value: 'qa_internal', label: 'QA Internal' },
+    { value: 'qa_vendor', label: 'QA Vendor' },
+    { value: 'user_umum', label: 'User Umum' }
+  ],
+
+  /* All roles including the fixed Admin, for dropdowns etc. */
+  get ROLES(){
+    const custom = (App.state.settings && App.state.settings.roles) || this.DEFAULT_ROLES;
+    return [{ value: 'admin', label: 'Admin', builtin: true }, ...custom];
+  },
+  customRoles(){ return (App.state.settings.roles && App.state.settings.roles.slice()) || this.DEFAULT_ROLES.slice(); },
+
+  /* Checklist rows shown on the Role Permission matrix page (usermanagement.js). */
+  PERMISSION_KEYS: [
+    { key: 'dashboard', label: 'Dashboard (lihat)' },
+    { key: 'summary', label: 'Summary (lihat)' },
+    { key: 'testcase_create', label: 'Test Case — Tambah' },
+    { key: 'testcase_read', label: 'Test Case — Lihat' },
+    { key: 'testcase_update', label: 'Test Case — Edit' },
+    { key: 'testcase_delete', label: 'Test Case — Hapus' },
+    { key: 'testcase_fileShare', label: 'Test Case — Share File antar Workspace' },
+    { key: 'activitylog', label: 'Activity Log (lihat)' },
+    { key: 'bugreport_fileCreate', label: 'Bug Report — Buat File' },
+    { key: 'bugreport_create', label: 'Bug Report — Tambah' },
+    { key: 'bugreport_read', label: 'Bug Report — Lihat' },
+    { key: 'bugreport_update', label: 'Bug Report — Edit (semua field)' },
+    { key: 'bugreport_updateStatusPriority', label: 'Bug Report — Edit Status/Priority saja' },
+    { key: 'bugreport_delete', label: 'Bug Report — Hapus' },
+    { key: 'bugreport_board', label: 'Bug Report — Board (drag & drop)' },
+    { key: 'master', label: 'Master — Status Bug Report' },
+    { key: 'usermanagement', label: 'User Management — Daftar User' },
+    { key: 'settings', label: 'Settings' }
+  ],
+
+  /* Seed permissions per role — adjustable anytime from Role Permission page,
+     stored in settings.rolePermissions. Admin is always full-access and never
+     goes through this matrix (see can(), hardcoded to avoid self-lockout). */
+  DEFAULT_ROLE_PERMISSIONS: {
+    pm_ba: { dashboard: true, summary: true, bugreport_read: true, bugreport_updateStatusPriority: true },
+    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true },
+    qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true },
+    user_umum: { testcase_read: true, bugreport_read: true }
+  },
+
   /* ---- Session ---- */
-  role(){ return sessionStorage.getItem(this.ROLE_KEY); },
+  role(){
+    const r = sessionStorage.getItem(this.ROLE_KEY);
+    return r === 'user' ? 'user_umum' : r; // legacy role value from before the permission matrix
+  },
   isAdmin(){ return this.role() === 'admin'; },
   currentEmail(){ return sessionStorage.getItem(this.EMAIL_KEY); },
+  currentWorkspaceId(){ return sessionStorage.getItem(this.WORKSPACE_KEY) || null; },
+
+  /* ---- Workspace CRUD (settings.workspaces) — separates files per team/department.
+     A file with no workspaceId (legacy data, or created by a workspace-less admin)
+     stays visible to everyone, so nothing existing gets locked out. ---- */
+  workspaces(){ return App.state.settings.workspaces || []; },
+  findWorkspace(id){ return this.workspaces().find(w => w.id === id) || null; },
+
+  addWorkspace(name){
+    if (!name || !name.trim()) return { ok: false, error: 'Nama workspace wajib diisi.' };
+    const id = 'WS-' + Date.now();
+    App.state.settings.workspaces = this.workspaces();
+    App.state.settings.workspaces.push({ id, name: name.trim() });
+    App.saveSettings();
+    return { ok: true, id };
+  },
+
+  updateWorkspace(id, name){
+    const ws = this.findWorkspace(id);
+    if (!ws) return { ok: false, error: 'Workspace tidak ditemukan.' };
+    if (!name || !name.trim()) return { ok: false, error: 'Nama workspace wajib diisi.' };
+    ws.name = name.trim();
+    App.saveSettings();
+    return { ok: true };
+  },
+
+  /* Files with no workspaceId are shared/visible to everyone (legacy data,
+     or created by a workspace-less admin). A file can also be explicitly
+     shared with other workspaces via `sharedWith` (array of workspace ids),
+     set through shareFile() — gated by the testcase_fileShare permission.
+     Admin always sees every file. */
+  visibleFiles(allFiles){
+    if (this.isAdmin()) return allFiles;
+    const ws = this.currentWorkspaceId();
+    return allFiles.filter(f => !f.workspaceId || f.workspaceId === ws || (f.sharedWith || []).includes(ws));
+  },
+
+  /* Share/unshare a file with other workspaces. Only the owning workspace
+     (or admin) may change sharing, and only with testcase_fileShare permission. */
+  canShareFile(file){
+    if (this.isAdmin()) return this.can('testcase_fileShare');
+    if (!file.workspaceId) return false; // shared/legacy files have no single owner
+    return file.workspaceId === this.currentWorkspaceId() && this.can('testcase_fileShare');
+  },
+
+  deleteWorkspace(id){
+    const inUse = (App.state.settings.users || []).some(u => u.workspaceId === id);
+    if (inUse) return { ok: false, error: 'Workspace masih dipakai user, pindahkan user tersebut dulu.' };
+    App.state.settings.workspaces = this.workspaces().filter(w => w.id !== id);
+    App.saveSettings();
+    return { ok: true };
+  },
+
+  /* ---- Role CRUD (settings.roles) ---- */
+  normalizeRoleCode(code){ return String(code || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); },
+
+  findRole(value){ return this.customRoles().find(r => r.value === value) || null; },
+
+  addRole(label, code){
+    const value = this.normalizeRoleCode(code);
+    if (!label || !label.trim()) return { ok: false, error: 'Nama role wajib diisi.' };
+    if (!value) return { ok: false, error: 'Kode role wajib diisi.' };
+    if (value === 'admin' || this.findRole(value)) return { ok: false, error: 'Kode role sudah dipakai.' };
+    App.state.settings.roles = this.customRoles();
+    App.state.settings.roles.push({ value, label: label.trim() });
+    App.state.settings.rolePermissions = App.state.settings.rolePermissions || {};
+    App.state.settings.rolePermissions[value] = {};
+    App.saveSettings();
+    return { ok: true, value };
+  },
+
+  updateRole(value, label){
+    const role = this.findRole(value);
+    if (!role) return { ok: false, error: 'Role tidak ditemukan.' };
+    if (!label || !label.trim()) return { ok: false, error: 'Nama role wajib diisi.' };
+    role.label = label.trim();
+    App.saveSettings();
+    return { ok: true };
+  },
+
+  deleteRole(value){
+    if (value === 'admin') return { ok: false, error: 'Role Admin tidak bisa dihapus.' };
+    const inUse = (App.state.settings.users || []).some(u => u.role === value);
+    if (inUse) return { ok: false, error: 'Role masih dipakai user, pindahkan user tersebut dulu.' };
+    App.state.settings.roles = this.customRoles().filter(r => r.value !== value);
+    if (App.state.settings.rolePermissions) delete App.state.settings.rolePermissions[value];
+    App.saveSettings();
+    return { ok: true };
+  },
+
+  /* ---- Permission matrix ---- */
+  can(permKey){
+    if (this.isAdmin()) return true;
+    const role = this.role();
+    const saved = App.state.settings.rolePermissions && App.state.settings.rolePermissions[role];
+    const map = saved || this.DEFAULT_ROLE_PERMISSIONS[role] || {};
+    return !!map[permKey];
+  },
 
   /* ---- Pure helpers (no storage/DOM access — unit-testable) ---- */
   normalizeEmail(email){ return String(email || '').trim().toLowerCase(); },
@@ -51,11 +202,14 @@ const Auth = {
   },
 
   /* ---- Login/session lifecycle ---- */
-  enter(role, email){
+  enter(role, email, workspaceId){
     sessionStorage.setItem(this.ROLE_KEY, role);
     sessionStorage.setItem(this.EMAIL_KEY, email);
+    if (workspaceId) sessionStorage.setItem(this.WORKSPACE_KEY, workspaceId);
+    else sessionStorage.removeItem(this.WORKSPACE_KEY);
     document.body.classList.remove('pre-auth');
     App.init();
+    ActivityLog.record('login', `${email} login sebagai ${role}`);
     this.renderBadge();
   },
 
@@ -69,12 +223,14 @@ const Auth = {
       return;
     }
     errEl.textContent = '';
-    this.enter(user.role, this.normalizeEmail(email));
+    this.enter(user.role, this.normalizeEmail(email), user.workspaceId);
   },
 
   logout(){
+    ActivityLog.record('logout', `${this.currentEmail()} logout`);
     sessionStorage.removeItem(this.ROLE_KEY);
     sessionStorage.removeItem(this.EMAIL_KEY);
+    sessionStorage.removeItem(this.WORKSPACE_KEY);
     location.reload();
   },
 
@@ -87,8 +243,6 @@ const Auth = {
       <button class="btn sm ghost" id="authLogoutBtn">Logout</button>
     `;
     document.getElementById('authLogoutBtn').addEventListener('click', () => this.logout());
-    const navUM = document.getElementById('navUserManagement');
-    if (navUM) navUM.style.display = this.isAdmin() ? 'flex' : 'none';
   },
 
   bindLoginScreen(){

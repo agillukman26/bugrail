@@ -27,17 +27,85 @@ const BugReportModule = {
   ui: {
     search: '', filters: { module:'', severity:'', priority:'', status:'', tester:'' },
     sortKey: 'reportDate', sortDir: 'desc', page: 1, pageSize: 10,
-    selected: new Set(), editingId: null
+    selected: new Set(), editingId: null, activeFileId: sessionStorage.getItem('qa_bug_active_file') || null,
+    view: 'table', detailId: null, chatTab: 'comment'
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
-  all(){ return App.state.bugs; },
+  all(){
+    if (Auth.isAdmin()) return App.state.bugs;
+    const visibleIds = new Set(this.files().map(f => f.id));
+    return App.state.bugs.filter(b => !b.fileId || visibleIds.has(b.fileId));
+  },
+
+  /* ---- files (grouping, shared with Test Case module) ---- */
+  files(){ return Auth.visibleFiles(App.state.files); },
+  fileCount(fileId){ return App.state.bugs.filter(b => b.fileId === fileId).length; },
+  createFile(name, workspaceId = Auth.currentWorkspaceId()){
+    name = (name || '').trim();
+    if (!name) return;
+    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdAt: nowISO() };
+    App.state.files.push(file);
+    App.saveFiles();
+    ActivityLog.record('bug_file_create', `File Bug Report "${name}" dibuat`);
+    this.renderFileList();
+    Toast.show(`File "${name}" dibuat.`, 'success');
+  },
+  async editFile(fileId){
+    const file = this.files().find(f => f.id === fileId);
+    if (!file) return;
+    const canShare = Auth.canShareFile(file);
+    const result = await fileEditDialog(file, canShare, Auth.workspaces());
+    if (!result) return;
+    const oldName = file.name;
+    const oldShared = (file.sharedWith || []).slice().sort();
+    file.name = result.name;
+    if (canShare) file.sharedWith = result.sharedWith;
+    App.saveFiles();
+    if (oldName !== file.name) ActivityLog.record('bug_file_rename', `File Bug Report "${oldName}" diganti nama jadi "${file.name}"`);
+    const newShared = (file.sharedWith || []).slice().sort();
+    if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
+      ActivityLog.record('bug_file_share', newShared.length
+        ? `File Bug Report "${file.name}" dibagikan ke ${newShared.length} workspace`
+        : `Sharing File Bug Report "${file.name}" dihapus`);
+    }
+    this.render();
+    Toast.show(`File "${file.name}" diperbarui.`, 'success');
+  },
+  async deleteFile(fileId){
+    if (!Auth.isAdmin()){ Toast.show('Hanya Admin yang dapat menghapus file.', 'error'); return; }
+    const file = this.files().find(f => f.id === fileId);
+    const count = this.fileCount(fileId);
+    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${count} bug di dalamnya akan dihapus permanen.`, 'Hapus');
+    if (!ok) return;
+    App.state.files = App.state.files.filter(f => f.id !== fileId);
+    App.state.bugs = App.state.bugs.filter(b => b.fileId !== fileId);
+    App.saveFiles();
+    App.saveBugs();
+    ActivityLog.record('bug_file_delete', `File Bug Report "${file.name}" dihapus`);
+    if (this.ui.activeFileId === fileId){ this.ui.activeFileId = null; sessionStorage.removeItem('qa_bug_active_file'); }
+    this.render();
+    Toast.show(`File "${file.name}" dihapus.`, 'info');
+  },
+  openFile(fileId){
+    this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
+    sessionStorage.setItem('qa_bug_active_file', fileId);
+    this.render();
+  },
+  backToFiles(){
+    this.ui.activeFileId = null; this.ui.search = '';
+    sessionStorage.removeItem('qa_bug_active_file');
+    const globalSearch = document.getElementById('globalSearch');
+    if (globalSearch) globalSearch.value = '';
+    this.render();
+  },
 
   filtered(){
-    const { search, filters, sortKey, sortDir } = this.ui;
+    const { search, filters, sortKey, sortDir, activeFileId } = this.ui;
     let rows = this.all().filter(b => {
+      if (activeFileId && b.fileId !== activeFileId) return false;
       if (search){
-        const hay = `${b.id} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.stepsToReproduce||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
+        const hay = `${b.id} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -61,6 +129,32 @@ const BugReportModule = {
   uniqueValues(field){ return [...new Set(this.all().map(b => b[field]).filter(Boolean))].sort(); },
 
   render(){
+    // Reload lands with activeFileId restored from sessionStorage — if that
+    // file was deleted, or its workspace no longer shares it with this user,
+    // fall back to the file list instead of showing a stuck empty detail view.
+    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)){
+      this.ui.activeFileId = null;
+      sessionStorage.removeItem('qa_bug_active_file');
+    }
+    const searching = !!this.ui.search;
+    const inFile = !!this.ui.activeFileId || searching;
+    document.getElementById('bugFileListView').style.display = inFile ? 'none' : 'block';
+    document.getElementById('bugFileDetailView').style.display = inFile ? 'block' : 'none';
+    document.getElementById('bugNewFileBtn').style.display = Auth.can('bugreport_fileCreate') ? '' : 'none';
+    if (!inFile){ this.renderFileList(); return; }
+
+    const activeFile = this.files().find(f => f.id === this.ui.activeFileId);
+    document.getElementById('bugActiveFileName').textContent = activeFile
+      ? `📁 ${activeFile.name}`
+      : `🔎 Hasil pencarian "${this.ui.search}" (semua file)`;
+    document.getElementById('bugActiveFileHint').textContent = activeFile
+      ? `(${this.fileCount(this.ui.activeFileId)} bug)`
+      : `${this.filtered().length} hasil ditemukan`;
+
+    document.getElementById('bugAddBtn').style.display = Auth.can('bugreport_create') ? '' : 'none';
+    document.getElementById('bugViewToggle').querySelector('[data-view="board"]').style.display = Auth.can('bugreport_board') ? '' : 'none';
+    if (!Auth.can('bugreport_board') && this.ui.view === 'board') this.ui.view = 'table';
+
     this.renderFilterOptions();
     const rows = this.filtered();
     const total = rows.length;
@@ -69,13 +163,33 @@ const BugReportModule = {
     const start = (this.ui.page - 1) * this.ui.pageSize;
     const pageRows = rows.slice(start, start + this.ui.pageSize);
 
+    const isBoard = this.ui.view === 'board';
     document.getElementById('bugEmptyState').style.display = total ? 'none' : 'flex';
-    document.getElementById('bugTableWrap').style.display = total ? 'block' : 'none';
+    if (!total){
+      const searchingNow = !!this.ui.search || Object.values(this.ui.filters).some(Boolean);
+      document.getElementById('bugEmptyGlyph').textContent = searchingNow ? '🔍' : '🐞';
+      document.getElementById('bugEmptyTitle').textContent = searchingNow ? 'Data tidak ditemukan' : 'Belum ada Bug Report';
+      document.getElementById('bugEmptyDesc').textContent = searchingNow ? 'Coba kata kunci atau filter lain.' : 'Buat bug baru, atau klik "Create Bug" pada Test Case berstatus Failed.';
+      document.getElementById('bugEmptyAddBtn').style.display = searchingNow ? 'none' : (Auth.can('bugreport_create') ? '' : 'none');
+    }
+    document.getElementById('bugTableWrap').style.display = (total && !isBoard) ? 'block' : 'none';
+    document.getElementById('bugTableFooter').style.display = isBoard ? 'none' : 'flex';
+    document.getElementById('bugBoardWrap').style.display = (isBoard && total) ? 'flex' : 'none';
+    if (isBoard){
+      if (total) this.renderBoard(rows);
+      const bulkBar = document.getElementById('bugBulkBar');
+      bulkBar.style.display = 'none';
+      return;
+    }
+
+    const canEdit = Auth.can('bugreport_update') || Auth.can('bugreport_updateStatusPriority');
+    const canDelete = Auth.can('bugreport_delete');
 
     const bulkBar = document.getElementById('bugBulkBar');
     bulkBar.style.display = this.ui.selected.size ? 'flex' : 'none';
     bulkBar.querySelector('.count').textContent = this.ui.selected.size;
-
+    document.getElementById('bugBulkDeleteBtn').style.display = canDelete ? '' : 'none';
+    document.getElementById('bugBulkStatusSelect').style.display = canEdit ? '' : 'none';
     document.getElementById('bugTableBody').innerHTML = pageRows.map(b => `
       <tr>
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
@@ -88,9 +202,12 @@ const BugReportModule = {
         <td>${escapeHtml(b.tester || '-')}</td>
         <td>${formatDate(b.reportDate)}</td>
         <td class="cell-actions">
-          <button class="btn sm ghost" data-act="view" data-id="${b.id}" title="Lihat / Edit">✎</button>
-          <button class="btn sm ghost" data-act="print" data-id="${b.id}" title="Print">🖨</button>
-          <button class="btn sm ghost" data-act="del" data-id="${b.id}" title="Delete">🗑</button>
+          ${actionMenu(`
+            <button data-act="view" data-id="${b.id}">👁 Lihat Detail</button>
+            ${canEdit ? `<button data-act="edit" data-id="${b.id}">✎ Edit</button>` : ''}
+            <button data-act="print" data-id="${b.id}">🖨 Print</button>
+            ${canDelete ? `<button class="danger" data-act="del" data-id="${b.id}">🗑 Delete</button>` : ''}
+          `)}
         </td>
       </tr>
     `).join('');
@@ -99,6 +216,227 @@ const BugReportModule = {
     this.renderPagination(totalPages);
     this.bindRowEvents();
     document.getElementById('bugSelectAll').checked = pageRows.length > 0 && pageRows.every(r => this.ui.selected.has(r.id));
+  },
+
+  renderFileList(){
+    App.ensureDefaultFile();
+    const wrap = document.getElementById('bugFileListGrid');
+    const files = this.files();
+    if (!files.length){
+      wrap.innerHTML = `<p class="text-faint" style="font-size:13.5px; grid-column:1/-1; padding:24px 0; text-align:center;">📁 Belum ada file. Buat file di halaman Test Case.</p>`;
+      return;
+    }
+    wrap.innerHTML = files.map(f => {
+      const shareCount = (f.sharedWith || []).length;
+      return `
+      <div class="card tc-file-card" data-open="${f.id}">
+        <div class="flex-between">
+          <h3 style="margin:0; font-size:14.5px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
+          ${actionMenu(`
+            <button data-act="edit" data-id="${f.id}">✎ Edit</button>
+            <button class="danger" data-act="del" data-id="${f.id}">🗑 Hapus</button>
+          `)}
+        </div>
+        <div class="flex-between" style="margin-top:8px;">
+          <p class="text-faint" style="font-size:12.5px; margin:0;">${this.fileCount(f.id)} bug</p>
+          ${shareCount ? `<span class="badge st-notrun" title="Dibagikan ke ${shareCount} workspace">📤 ${shareCount}</span>` : ''}
+        </div>
+      </div>
+    `;
+    }).join('');
+    wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', (e) => {
+      if (e.target.closest('.action-menu')) return;
+      this.openFile(el.dataset.open);
+    }));
+    wrap.querySelectorAll('.action-menu button[data-act]').forEach(btn => {
+      btn.onclick = async () => {
+        const { act, id } = btn.dataset;
+        if (act === 'edit') this.editFile(id);
+        if (act === 'del') this.deleteFile(id);
+      };
+    });
+  },
+
+  renderBoard(rows){
+    const wrap = document.getElementById('bugBoardWrap');
+    const columns = this.statusMaster().slice().sort((a,b) => a.order - b.order);
+    wrap.innerHTML = columns.map(col => {
+      const items = rows.filter(b => b.status === col.name);
+      return `
+        <div class="board-col" data-status="${escapeHtml(col.name)}">
+          <div class="board-col-head" style="border-top:3px solid ${col.color};">
+            <span>${escapeHtml(col.name)}</span>
+            <span class="board-col-count">${items.length}</span>
+          </div>
+          <div class="board-col-body" data-status="${escapeHtml(col.name)}">
+            ${items.map(b => `
+              <div class="board-card" draggable="true" data-id="${b.id}">
+                <div class="board-card-top">
+                  <span class="mono text-dim" style="font-size:11px;">${escapeHtml(b.id)}</span>
+                  ${this.severityBadge(b.severity)}
+                </div>
+                <div class="board-card-title">${escapeHtml(b.title)}</div>
+                <div class="board-card-meta"><span>${escapeHtml(b.tester || '-')}</span><span>${formatDate(b.reportDate)}</span></div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    wrap.querySelectorAll('.board-card').forEach(card => {
+      card.addEventListener('click', () => this.openDetail(card.dataset.id));
+      card.addEventListener('dragstart', e => {
+        card.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', card.dataset.id);
+      });
+      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    });
+    wrap.querySelectorAll('.board-col-body').forEach(colBody => {
+      colBody.addEventListener('dragover', e => { e.preventDefault(); colBody.classList.add('drag-over'); });
+      colBody.addEventListener('dragleave', () => colBody.classList.remove('drag-over'));
+      colBody.addEventListener('drop', e => {
+        e.preventDefault();
+        colBody.classList.remove('drag-over');
+        const id = e.dataTransfer.getData('text/plain');
+        this.setStatus(id, colBody.dataset.status);
+      });
+    });
+  },
+
+  setStatus(id, status){
+    if (!Auth.can('bugreport_board')) return;
+    const bug = this.all().find(b => b.id === id);
+    if (!bug || bug.status === status) return;
+    const from = bug.status;
+    this.logActivity(bug, bug.status, status);
+    bug.status = status;
+    App.saveBugs();
+    ActivityLog.record('bugreport_update', `Bug ${id} status diubah dari ${from} ke ${status} (board)`);
+    this.render();
+  },
+
+  logActivity(bug, from, to){
+    if (!bug.activity) bug.activity = [];
+    bug.activity.push({ at: nowISO(), from, to });
+  },
+
+  /* Times a bug bounced back to Reopened/Retest — i.e. how many retest rounds it
+     failed. Status naming isn't unified across the app (form dropdown uses
+     "Reopened", board/master status list uses "Retest"), so match both. */
+  reopenCount(bug){
+    return (bug.activity || []).filter(a => a.to === 'Reopened' || a.to === 'Retest').length;
+  },
+
+  /* ---- Detail modal (read-only view + activity log + chat) ---- */
+  openDetail(id){
+    const bug = this.all().find(b => b.id === id);
+    if (!bug) return;
+    this.ui.detailId = id;
+    this.ui.chatTab = 'comment';
+    document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
+      el.classList.toggle('active', el.dataset.chatTab === 'comment');
+    });
+    document.getElementById('bugDetailTitle').textContent = `Detail Bug — ${bug.id}`;
+
+    /* Content blocks (description/steps/results) read like a document, so they
+       live in the main column as titled cards. Short facts (status, severity,
+       tester...) go in a compact sidebar instead of the same flat row list —
+       keeps the two kinds of information from blurring into one wall of text. */
+    const block = (label, value, extraClass = '') => `
+      <div class="bug-detail-block ${extraClass}">
+        <div class="bug-detail-block-label">${label}</div>
+        <div class="bug-detail-block-body">${value}</div>
+      </div>`;
+    const sideField = (label, value) => `
+      <div class="bug-side-field">
+        <div class="bug-side-label">${label}</div>
+        <div class="bug-side-value">${value}</div>
+      </div>`;
+    const retestCount = this.reopenCount(bug);
+    const attachmentsHtml = (bug.attachments || '').split('\n').map(s => s.trim()).filter(Boolean)
+      .map(link => /^https?:\/\//i.test(link) ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a>` : escapeHtml(link))
+      .join('<br>') || null;
+
+    document.getElementById('bugDetailBody').innerHTML = `
+      <div class="bug-detail-grid">
+        <div class="bug-detail-main">
+          <h3 class="bug-detail-title">${escapeHtml(bug.title)}</h3>
+          ${block('Description', escapeHtml(bug.description || '-'))}
+          ${block('Steps to Reproduce', bug.steps || '-')}
+          ${block('Expected Result', escapeHtml(bug.expectedResult || '-'))}
+          ${block('Actual Result', escapeHtml(bug.actualResult || '-'))}
+          ${attachmentsHtml ? block('Attachment', attachmentsHtml) : ''}
+        </div>
+        <div class="bug-detail-side">
+          <div class="bug-side-heading">Details</div>
+          ${sideField('Status', this.statusBadge(bug.status))}
+          ${sideField('Severity', this.severityBadge(bug.severity))}
+          ${sideField('Priority', escapeHtml(bug.priority))}
+          ${sideField('Module', escapeHtml(bug.module || '-'))}
+          ${sideField('Tester', escapeHtml(bug.tester || '-'))}
+          ${sideField('Report Date', bug.reportDate ? formatDate(bug.reportDate) : '-')}
+          ${sideField('Jumlah Retest', retestCount ? `${retestCount}x (Reopened)` : 'Belum pernah')}
+        </div>
+      </div>`;
+
+    this.renderChat(bug);
+    document.getElementById('bugChatSendBtn').onclick = () => this.addComment(bug.id);
+    document.getElementById('bugDetailModalOverlay').classList.add('active');
+  },
+
+  setChatTab(tab, bug){
+    this.ui.chatTab = tab;
+    document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
+      el.classList.toggle('active', el.dataset.chatTab === tab);
+    });
+    this.renderChat(bug);
+  },
+
+  /* Merges status-change activity + chat comments into one timeline, sorted by time,
+     filtered by the active tab (All / Comments / Activity — Jira-style). */
+  renderChat(bug){
+    const list = document.getElementById('bugChatList');
+    const tab = this.ui.chatTab;
+    let feed = [
+      ...(bug.activity || []).map(a => ({ type:'activity', at:a.at, from:a.from, to:a.to })),
+      ...(bug.comments || []).map(c => ({ type:'comment', at:c.at, email:c.email, text:c.text }))
+    ].sort((a,b) => new Date(a.at) - new Date(b.at));
+    if (tab !== 'all') feed = feed.filter(item => item.type === tab);
+
+    if (!feed.length){
+      const emptyLabel = tab === 'comment' ? 'Belum ada komentar.' : tab === 'activity' ? 'Belum ada aktivitas.' : 'Belum ada aktivitas atau pesan.';
+      list.innerHTML = `<p class="text-faint" style="font-size:12.5px;">${emptyLabel}</p>`;
+      return;
+    }
+
+    list.innerHTML = feed.map(item => {
+      if (item.type === 'activity'){
+        return `<div class="bug-chat-notice">🔄 Status berubah <b>${escapeHtml(item.from)}</b> → <b>${escapeHtml(item.to)}</b> · ${formatDateTime(item.at)}</div>`;
+      }
+      const textHtml = escapeHtml(item.text).replace(/\n/g, '<br>')
+        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+      return `
+        <div class="bug-chat-msg">
+          <span class="bug-chat-author">${escapeHtml(item.email)}<span class="bug-chat-time">${formatDateTime(item.at)}</span></span>
+          <div class="bug-chat-text">${textHtml}</div>
+        </div>
+      `;
+    }).join('');
+    list.scrollTop = list.scrollHeight;
+  },
+
+  addComment(id){
+    const input = document.getElementById('bugChatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const bug = this.all().find(b => b.id === id);
+    if (!bug) return;
+    if (!bug.comments) bug.comments = [];
+    bug.comments.push({ at: nowISO(), email: Auth.currentEmail() || 'unknown', text });
+    App.saveBugs();
+    input.value = '';
+    this.renderChat(bug);
   },
 
   severityBadge(sev){ return `<span class="badge sev-${sev.toLowerCase()}"><span class="dot"></span>${sev}</span>`; },
@@ -116,6 +454,15 @@ const BugReportModule = {
     };
     build('bugFilterModule', 'module');
     build('bugFilterTester', 'tester');
+  },
+
+  resetFilters(){
+    this.ui.filters = { module:'', severity:'', priority:'', status:'', tester:'' };
+    this.ui.page = 1;
+    document.getElementById('bugFilterSeverity').value = '';
+    document.getElementById('bugFilterPriority').value = '';
+    document.getElementById('bugFilterStatus').value = '';
+    this.render();
   },
 
   renderPagination(totalPages){
@@ -144,7 +491,8 @@ const BugReportModule = {
     document.querySelectorAll('#bugTableBody button[data-act]').forEach(btn => {
       btn.onclick = () => {
         const { act, id } = btn.dataset;
-        if (act === 'view') this.openForm(id);
+        if (act === 'view') this.openDetail(id);
+        if (act === 'edit') this.openForm(id);
         if (act === 'del') this.remove(id);
         if (act === 'print') this.printOne(id);
       };
@@ -155,19 +503,30 @@ const BugReportModule = {
      - bugId set => editing existing bug
      - prefillTestCaseId set (from "Create Bug" on a Failed test case) => new bug pre-linked */
   openForm(bugId = null, prefillTestCaseId = null){
+    const bug = bugId ? this.all().find(b => b.id === bugId) : null;
+    const canFull = Auth.can('bugreport_update');
+    const canLimited = Auth.can('bugreport_updateStatusPriority');
+    if (!bug && !Auth.can('bugreport_create')){ Toast.show('Tidak punya izin membuat Bug Report.', 'error'); return; }
+    if (bug && !canFull && !canLimited){ Toast.show('Tidak punya izin mengedit Bug Report.', 'error'); return; }
+    this.ui.limitedEdit = !!(bug && !canFull && canLimited);
+
     this.ui.editingId = bugId;
     const f = document.getElementById('bugForm');
     f.reset();
-    const bug = bugId ? this.all().find(b => b.id === bugId) : null;
+    if (bug) this.ui.activeFileId = bug.fileId;
+    else if (prefillTestCaseId){
+      const tc = App.state.testcases.find(t => t.id === prefillTestCaseId);
+      if (tc) this.ui.activeFileId = tc.fileId;
+    }
 
-    this.populateTestCaseSelect();
     document.getElementById('bugModalTitle').textContent = bug ? `Edit Bug — ${bug.id}` : 'Buat Bug Report';
     document.getElementById('bugFieldId').value = bug ? bug.id : '(auto generate)';
     document.getElementById('bugFieldDate').value = bug ? formatDate(bug.reportDate) : formatDate(todayISO());
 
     if (bug){
-      f.testCaseId.value = bug.testCaseId || '';
-      this.fillFromTestCase(bug.testCaseId, true);
+      f.module.value = bug.module || ''; f.scenario.value = bug.scenario || '';
+      f.expectedResultRef.value = bug.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(bug.steps || '');
+      this.setTestCase(bug.testCaseId || null, true);
       f.title.value = bug.title; f.description.value = bug.description;
       f.actualResult.value = bug.actualResult || '';
       f.severity.value = bug.severity; f.priority.value = bug.priority; f.status.value = bug.status;
@@ -176,32 +535,80 @@ const BugReportModule = {
       f.attachments.value = bug.attachments || ''; f.tester.value = bug.tester || '';
     } else {
       f.severity.value = 'Medium'; f.priority.value = 'Medium'; f.status.value = 'Open';
-      if (prefillTestCaseId){
-        f.testCaseId.value = prefillTestCaseId;
-        this.fillFromTestCase(prefillTestCaseId, true);
-      }
+      f.tester.value = Auth.currentEmail() || '';
+      this.setTestCase(prefillTestCaseId || null, true);
     }
+    this.applyFormFieldLock();
+    this.render();
     document.getElementById('bugModalOverlay').classList.add('active');
   },
   closeForm(){ document.getElementById('bugModalOverlay').classList.remove('active'); },
 
-  populateTestCaseSelect(){
-    const sel = document.getElementById('bugTestCaseSelect');
-    sel.innerHTML = `<option value="">— Tidak terkait Test Case —</option>` +
-      App.state.testcases.map(t => `<option value="${t.id}">${t.id} — ${escapeHtml(t.scenario).slice(0,60)}</option>`).join('');
+  /* Limited editors (bugreport_updateStatusPriority without full bugreport_update)
+     can only change Status & Priority — every other field is disabled. */
+  applyFormFieldLock(){
+    const f = document.getElementById('bugForm');
+    const keepEnabled = ['status', 'priority'];
+    Array.from(f.elements).forEach(el => {
+      if (!el.name) return;
+      el.disabled = this.ui.limitedEdit && !keepEnabled.includes(el.name);
+    });
   },
 
-  /* Core integration behaviour: auto-fill readonly fields from the chosen Test Case. */
+  /* ---- Test Case combobox (searchable, replaces a plain <select> so long
+     test case lists stay usable) ---- */
+  setTestCase(tcId, silent = false){
+    document.getElementById('bugTestCaseSelect').value = tcId || '';
+    const label = document.getElementById('bugTestCaseTriggerText');
+    const tc = tcId ? App.state.testcases.find(t => t.id === tcId) : null;
+    label.textContent = tc ? `${tc.id} — ${tc.scenario.slice(0,60)}` : '— Tidak terkait Test Case —';
+    label.classList.toggle('text-faint', !tc);
+    this.fillFromTestCase(tcId, silent);
+  },
+  renderTestCaseList(query){
+    const listEl = document.getElementById('bugTestCaseList');
+    const q = query.trim().toLowerCase();
+    const all = App.state.testcases;
+    const filtered = q ? all.filter(t => t.id.toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
+    const noneItem = `<div class="dropdown-item combobox-option" data-tc="">— Tidak terkait Test Case —</div>`;
+    if (!filtered.length){
+      listEl.innerHTML = noneItem + `<div class="combobox-empty"><p>Test case tidak ditemukan.</p></div>`;
+    } else {
+      listEl.innerHTML = noneItem + filtered.map(t => `<div class="dropdown-item combobox-option" data-tc="${escapeHtml(t.id)}">${escapeHtml(t.id)} — ${escapeHtml(t.scenario||'').slice(0,60)}</div>`).join('');
+    }
+    listEl.querySelectorAll('[data-tc]').forEach(el => {
+      el.addEventListener('click', () => {
+        this.setTestCase(el.dataset.tc || null);
+        document.getElementById('bugTestCaseDropdown').classList.remove('open');
+      });
+    });
+  },
+  openTestCaseCombobox(){
+    document.getElementById('bugTestCaseSearch').value = '';
+    this.renderTestCaseList('');
+  },
+
+  /* When a Test Case is linked, Module/Scenario/Steps/Expected Result are
+     locked to that Test Case's data. Without one, they're free text so a
+     standalone bug can still be reported. */
+  lockAutoFields(locked){
+    const f = document.getElementById('bugForm');
+    ['module','scenario','stepsRef','expectedResultRef'].forEach(name => { f[name].readOnly = locked; });
+    ['bugModuleField','bugScenarioField','bugStepsField','bugExpectedField'].forEach(id => {
+      document.getElementById(id).classList.toggle('readonly', locked);
+    });
+  },
+
   fillFromTestCase(tcId, silent = false){
     const f = document.getElementById('bugForm');
     const tc = App.state.testcases.find(t => t.id === tcId);
     if (!tc){
-      f.module.value = ''; f.scenario.value = '';
-      f.expectedResultRef.value = ''; f.stepsRef.value = '';
+      this.lockAutoFields(false);
       return;
     }
     f.module.value = tc.module; f.scenario.value = tc.scenario;
-    f.expectedResultRef.value = tc.expectedResult || ''; f.stepsRef.value = tc.steps || '';
+    f.expectedResultRef.value = tc.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(tc.steps || '');
+    this.lockAutoFields(true);
     if (!silent) Toast.show('Field Test Case otomatis terisi.', 'info', { duration: 1800 });
   },
 
@@ -211,7 +618,7 @@ const BugReportModule = {
     const data = {
       testCaseId: f.testCaseId.value || null,
       module: f.module.value, scenario: f.scenario.value,
-      expectedResult: f.expectedResultRef.value, steps: f.stepsRef.value, tester: f.tester.value.trim(),
+      expectedResult: f.expectedResultRef.value, steps: textToStepsHtml(f.stepsRef.value), tester: f.tester.value.trim(),
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
       environment: f.environment.value.trim(), browser: f.browser.value.trim(),
@@ -223,11 +630,15 @@ const BugReportModule = {
     }
     if (this.ui.editingId){
       const idx = App.state.bugs.findIndex(b => b.id === this.ui.editingId);
-      App.state.bugs[idx] = { ...App.state.bugs[idx], ...data };
+      const prev = App.state.bugs[idx];
+      if (prev.status !== data.status) this.logActivity(prev, prev.status, data.status);
+      App.state.bugs[idx] = { ...prev, ...data };
+      ActivityLog.record('bugreport_update', `Bug ${this.ui.editingId} diperbarui`);
       Toast.show(`Bug ${this.ui.editingId} diperbarui.`, 'success');
     } else {
       const id = IdGen.next('BUG');
-      App.state.bugs.push({ id, ...data, reportDate: nowISO() });
+      App.state.bugs.push({ id, ...data, fileId: this.ui.activeFileId, reportDate: nowISO() });
+      ActivityLog.record('bugreport_create', `Bug ${id} dibuat`);
       Toast.show(`Bug ${id} dibuat.`, 'success');
     }
     App.saveBugs();
@@ -236,29 +647,40 @@ const BugReportModule = {
   },
 
   async remove(id){
+    if (!Auth.can('bugreport_delete')){ Toast.show('Tidak punya izin menghapus Bug Report.', 'error'); return; }
     const ok = await confirmDialog('Hapus Bug Report?', `${id} akan dihapus.`);
     if (!ok) return;
     const idx = App.state.bugs.findIndex(b => b.id === id);
     const removed = App.state.bugs.splice(idx,1)[0];
+    ActivityLog.record('bugreport_delete', `Bug ${id} dihapus`);
     App.saveBugs(); this.ui.selected.delete(id); this.render();
     Toast.show(`${id} dihapus.`, 'info', { undo: () => { App.state.bugs.splice(idx,0,removed); App.saveBugs(); this.render(); } });
   },
 
   async bulkDelete(){
-    if (!this.ui.selected.size) return;
+    if (!this.ui.selected.size || !Auth.can('bugreport_delete')) return;
     const ids = [...this.ui.selected];
     const ok = await confirmDialog('Hapus Bug Terpilih?', `${ids.length} bug akan dihapus.`);
     if (!ok) return;
     const removed = App.state.bugs.filter(b => ids.includes(b.id));
     App.state.bugs = App.state.bugs.filter(b => !ids.includes(b.id));
+    ActivityLog.record('bugreport_delete', `${ids.length} bug dihapus (bulk)`);
     App.saveBugs(); this.ui.selected.clear(); this.render();
     Toast.show(`${ids.length} bug dihapus.`, 'info', { undo: () => { App.state.bugs.push(...removed); App.saveBugs(); this.render(); } });
   },
 
   bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status) return;
-    App.state.bugs.forEach(b => { if (this.ui.selected.has(b.id)) b.status = status; });
+    let changed = 0;
+    App.state.bugs.forEach(b => {
+      if (this.ui.selected.has(b.id) && b.status !== status){
+        this.logActivity(b, b.status, status);
+        b.status = status;
+        changed++;
+      }
+    });
     App.saveBugs(); this.render();
+    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)`);
     Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
   },
 
@@ -283,6 +705,7 @@ const BugReportModule = {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Bug Reports');
     XLSX.writeFile(wb, `BugReports_${todayISO()}.xlsx`);
+    ActivityLog.record('bugreport_export', `${rows.length} bug di-export ke Excel`);
     Toast.show('Export Excel Bug Report berhasil.', 'success');
   },
   exportCSV(){
@@ -296,13 +719,137 @@ const BugReportModule = {
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
     downloadBlob(arrayToCSV(this.filtered(), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
+    ActivityLog.record('bugreport_export', `${this.filtered().length} bug di-export ke CSV`);
     Toast.show('Export CSV Bug Report berhasil (siap import ke Google Spreadsheet).', 'success');
   },
 
+  /* ---- Import (Excel/CSV) ---- */
+  importFile(file){
+    if (!Auth.can('bugreport_create')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try{
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        let count = 0;
+        rows.forEach(r => {
+          const title = r['Bug Title'] || r.title;
+          const actualResult = r['Actual Result'] || r.actualResult;
+          if (!title || !actualResult) return;
+          const id = IdGen.next('BUG');
+          App.state.bugs.push({
+            id, testCaseId: r['Test Case ID'] || r.testCaseId || null,
+            module: r.Module || r.module || '', scenario: r.Scenario || r.scenario || '',
+            expectedResult: r['Expected Result'] || r.expectedResult || '', steps: '',
+            tester: r.Tester || r.tester || '', title, description: r.Description || r.description || '',
+            actualResult, severity: r.Severity || r.severity || 'Medium',
+            priority: r.Priority || r.priority || 'Medium', status: r.Status || r.status || 'Open',
+            environment: r.Environment || r.environment || '', browser: r.Browser || r.browser || '',
+            os: r.OS || r.os || '', device: r.Device || r.device || '',
+            buildVersion: r['Build Version'] || r.buildVersion || '', attachments: r.Attachment || r.attachments || '',
+            fileId: this.ui.activeFileId, reportDate: nowISO()
+          });
+          count++;
+        });
+        App.ensureDefaultFile();
+        App.saveBugs();
+        ActivityLog.record('bugreport_create', `${count} bug report di-import dari file`);
+        this.render();
+        Toast.show(`${count} bug report berhasil di-import.`, 'success');
+      }catch(err){
+        console.error(err);
+        Toast.show('Gagal membaca file. Pastikan format sesuai template.', 'error');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  },
+
+  async downloadImportTemplate(){
+    const cols = [
+      { key:'module', label:'Module', width:16 }, { key:'title', label:'Bug Title', width:30 },
+      { key:'description', label:'Description', width:26 }, { key:'expectedResult', label:'Expected Result', width:26 },
+      { key:'actualResult', label:'Actual Result', width:26 },
+      { key:'severity', label:'Severity', width:12, list:this.SEVERITY },
+      { key:'priority', label:'Priority', width:12, list:this.PRIORITY },
+      { key:'status', label:'Status', width:14, list:this.statusMaster().map(s=>s.name) },
+      { key:'tester', label:'Tester', width:16 },
+      { key:'environment', label:'Environment', width:16, list:['Local','Staging','Production'] },
+      { key:'browser', label:'Browser', width:14 }, { key:'os', label:'OS', width:14 },
+      { key:'device', label:'Device', width:16 }, { key:'buildVersion', label:'Build Version', width:14 }
+    ];
+    const sample = {
+      module:'Login', title:'Login gagal dengan password valid',
+      description:'User tidak bisa login walau kredensial benar', expectedResult:'User masuk ke Dashboard',
+      actualResult:'Muncul error "Invalid credentials"', severity:'High', priority:'High',
+      status:'Open', tester:'Jane', environment:'Staging', browser:'Chrome 126', os:'Android 14',
+      device:'Samsung A54', buildVersion:'v1.2.3'
+    };
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Template');
+    ws.columns = cols.map(c => ({ header: c.label, key: c.key, width: c.width }));
+
+    const headerRow = ws.getRow(1);
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5496' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    });
+
+    ws.addRow(cols.map(c => sample[c.key] ?? ''));
+
+    const thin = { style: 'thin', color: { argb: 'FFB0B7C3' } };
+    ws.eachRow(row => {
+      row.eachCell(cell => {
+        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+        if (cell.row !== 1) cell.alignment = { vertical: 'top', wrapText: true };
+      });
+    });
+
+    cols.forEach((c, i) => {
+      if (!c.list) return;
+      const colLetter = ws.getColumn(i + 1).letter;
+      ws.getCell(`${colLetter}2`).dataValidation = {
+        type: 'list', allowBlank: true, formulae: [`"${c.list.join(',')}"`]
+      };
+    });
+
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(buf, 'Template_Import_BugReport.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    Toast.show('Template import Bug Report diunduh.', 'success');
+  },
+
   bindStaticEvents(){
+    document.getElementById('bugBackToFilesBtn').addEventListener('click', () => this.backToFiles());
+    document.getElementById('bugNewFileBtn').addEventListener('click', async () => {
+      if (Auth.isAdmin()){
+        const result = await fileCreateDialog(Auth.workspaces());
+        if (result) this.createFile(result.name, result.workspaceId);
+      } else {
+        const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
+        if (name) this.createFile(name);
+      }
+    });
+    document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
+      el.addEventListener('click', () => {
+        const bug = this.all().find(b => b.id === this.ui.detailId);
+        if (bug) this.setChatTab(el.dataset.chatTab, bug);
+      });
+    });
+    document.querySelectorAll('#bugViewToggle button[data-view]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.ui.view = btn.dataset.view;
+        document.querySelectorAll('#bugViewToggle button').forEach(b => b.classList.toggle('active', b === btn));
+        this.render();
+      });
+    });
     const f = document.getElementById('bugForm');
     f.addEventListener('submit', e => this.submitForm(e));
-    f.testCaseId.addEventListener('change', e => this.fillFromTestCase(e.target.value));
+    document.getElementById('bugTestCaseTrigger').addEventListener('click', () => this.openTestCaseCombobox());
+    document.getElementById('bugTestCaseSearch').addEventListener('input', e => this.renderTestCaseList(e.target.value));
 
     document.getElementById('bugSearchInput').addEventListener('input', debounce(e => this.setSearch(e.target.value), 200));
     document.getElementById('bugSelectAll').addEventListener('change', e => {
@@ -316,6 +863,7 @@ const BugReportModule = {
         this.ui.filters[map[id]] = e.target.value; this.ui.page = 1; this.render();
       });
     });
+    document.getElementById('bugFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.querySelectorAll('#bugTable thead th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const key = th.dataset.key;
@@ -325,6 +873,51 @@ const BugReportModule = {
     });
     document.getElementById('bugBulkDeleteBtn').addEventListener('click', () => this.bulkDelete());
     document.getElementById('bugBulkStatusSelect').addEventListener('change', e => { this.bulkUpdateStatus(e.target.value); e.target.value=''; });
+
+    document.getElementById('bugExportExcelBtn').addEventListener('click', () => this.exportExcel());
+    document.getElementById('bugExportCsvBtn').addEventListener('click', () => this.exportCSV());
+    document.getElementById('bugImportTemplateBtn').addEventListener('click', () => this.downloadImportTemplate());
+    document.getElementById('bugImportTemplateBtn2').addEventListener('click', () => this.downloadImportTemplate());
+
+    const importOverlay = document.getElementById('bugImportModalOverlay');
+    const importDz = document.getElementById('bugImportDropzone');
+    const importInput = document.getElementById('bugImportFileInput');
+    const importPending = document.getElementById('bugImportPending');
+    const importConfirmBtn = document.getElementById('bugImportConfirmBtn');
+    let pendingFile = null;
+
+    const stageFile = (file) => {
+      if (!file) return;
+      pendingFile = file;
+      document.getElementById('bugImportFileName').textContent = file.name;
+      document.getElementById('bugImportFileSize').textContent = `${(file.size / 1024).toFixed(1)} KB`;
+      importDz.style.display = 'none';
+      importPending.style.display = 'block';
+      importConfirmBtn.style.display = 'inline-flex';
+    };
+    const resetImportModal = () => {
+      pendingFile = null;
+      importDz.style.display = 'flex';
+      importPending.style.display = 'none';
+      importConfirmBtn.style.display = 'none';
+    };
+
+    document.getElementById('bugImportBtn').addEventListener('click', () => { resetImportModal(); importOverlay.classList.add('active'); });
+    document.getElementById('bugImportCancelBtn').addEventListener('click', resetImportModal);
+    importDz.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', e => { stageFile(e.target.files[0]); e.target.value = ''; });
+    ['dragenter','dragover'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.add('dragover'); }));
+    ['dragleave','drop'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.remove('dragover'); }));
+    importDz.addEventListener('drop', e => stageFile(e.dataTransfer.files[0]));
+    importConfirmBtn.addEventListener('click', () => {
+      if (!pendingFile) return;
+      this.importFile(pendingFile);
+      importOverlay.classList.remove('active');
+      resetImportModal();
+    });
+    document.querySelectorAll('#bugImportModalOverlay [data-close]').forEach(btn => {
+      btn.addEventListener('click', () => importOverlay.classList.remove('active'));
+    });
   }
 };
 

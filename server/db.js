@@ -8,7 +8,10 @@ const client = new MongoClient(uri, { connectTimeoutMS: 5000 });
 let dbPromise = null;
 
 function getDb(){
-  if (!dbPromise) dbPromise = client.connect().then(() => client.db(dbName));
+  if (!dbPromise){
+    dbPromise = client.connect().then(() => client.db(dbName));
+    dbPromise.catch(() => { dbPromise = null; }); // let the next call retry instead of staying stuck on a dead connection
+  }
   return dbPromise;
 }
 
