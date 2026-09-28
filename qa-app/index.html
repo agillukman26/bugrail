@@ -1,715 +1,1319 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id" data-theme="light">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QA Test Management &amp; Bug Tracking</title>
-<link rel="stylesheet" href="css/style.css">
-<!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QA Test Management &amp; Bug Tracking</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
      Core app + data storage still work fully offline once these have loaded once. -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-</head>
-<body class="pre-auth">
-
-<div class="login-overlay" id="loginOverlay">
-  <div class="login-split">
-    <div class="login-branding">
-      <div class="sidebar-brand" style="border:none; padding:0 0 40px;">
-        <div class="mark">QA</div>
-        <div>
-          <div class="name">BugRail</div>
-          <div class="sub">Test &amp; Bug Suite</div>
-        </div>
-      </div>
-      <h1 class="login-headline">Quality Today,<br><span>Better Tomorrow.</span></h1>
-      <p class="text-dim" style="font-size:14px;">Centralize your testing process, track bugs, and ship with confidence.</p>
-      <div class="login-features">
-        <div class="login-feature">
-          <span class="glyph">☑</span>
-          <div><b>Organized Testing</b><p>Manage test cases, suites, and executions in one place.</p></div>
-        </div>
-        <div class="login-feature">
-          <span class="glyph">🐞</span>
-          <div><b>Smart Bug Tracking</b><p>Report, assign, and resolve bugs faster than ever.</p></div>
-        </div>
-        <div class="login-feature">
-          <span class="glyph">📊</span>
-          <div><b>Insightful Reports</b><p>Get real-time insights and make data-driven decisions.</p></div>
-        </div>
-      </div>
-      <p class="text-faint login-footer">© 2026 BugRail. All rights reserved.</p>
-    </div>
-
-    <div class="login-card">
-      <div class="sidebar-brand" style="border:none; justify-content:center; padding:0 0 18px;">
-        <div class="mark" style="width:52px; height:52px; border-radius:16px; font-size:18px;">QA</div>
-      </div>
-      <h2 style="text-align:center; margin:0 0 4px;">Welcome back!</h2>
-      <p class="text-dim" style="text-align:center; font-size:13.5px; margin:0 0 22px;">Sign in to continue to BugRail</p>
-      <form id="loginForm">
-        <div class="field">
-          <label>Email address</label>
-          <input type="email" id="loginEmail" autocomplete="username" placeholder="Enter your email" required>
-        </div>
-        <div class="field">
-          <label>Password</label>
-          <div class="login-pw-wrap">
-            <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Enter your password" required>
-            <button type="button" class="login-pw-toggle" id="loginPwToggle">👁</button>
-          </div>
-        </div>
-        <p class="text-faint" id="loginError" style="font-size:12.5px; min-height:16px; margin:2px 0 10px;"></p>
-        <button type="submit" class="btn primary" style="width:100%;">Sign in</button>
-      </form>
-    </div>
-  </div>
-</div>
-
-<div class="app-shell">
-
-  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-
-  <!-- ============ SIDEBAR ============ -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <div class="mark">QA</div>
-      <div>
-        <div class="name">BugRail</div>
-        <div class="sub">Test &amp; Bug Suite</div>
-      </div>
-    </div>
-    <nav class="nav">
-      <div class="nav-item" data-page="dashboard"><span class="icon">▦</span> Dashboard</div>
-      <div class="nav-item" data-page="testcase"><span class="icon">☑</span> Test Case </div>
-      <div class="nav-item" data-page="bugreport"><span class="icon">🐞</span> Bug Report</div>
-      <div class="nav-item" data-page="summary"><span class="icon">📊</span> Summary</div>
-      <!-- <div class="nav-item" data-page="importexport"><span class="icon">⇅</span> Import &amp; Export</div> -->
-      <div class="nav-group" id="navGroupMaster">
-        <div class="nav-item nav-group-toggle"><span class="icon">🗂</span> Master <span class="arrow">▾</span></div>
-        <div class="nav-subitem" data-page="masterstatus">Status Bug Report</div>
-      </div>
-      <div class="nav-item" data-page="usermanagement" id="navUserManagement" style="display:none;"><span class="icon">👤</span> User Management</div>
-      <div class="nav-item" data-page="settings"><span class="icon">⚙</span> Settings</div>
-    </nav>
-    <div class="sidebar-footer">
-      <div class="auth-badge" id="authBadge"></div>
-      <div class="theme-toggle" id="themeToggleBtn">
-        <span><span id="themeIcon">☀️</span> <span id="themeLabel">Light Mode</span></span>
-        <span>⇄</span>
-      </div>
-    </div>
-  </aside>
-
-  <!-- ============ MAIN ============ -->
-  <div class="main">
-    <header class="topbar">
-      <button class="hamburger" id="hamburgerBtn">☰</button>
-      <div>
-        <div class="page-title" id="pageTitle">Dashboard</div>
-        <div class="page-sub" id="pageSub">Ringkasan status pengujian &amp; bug secara realtime</div>
-      </div>
-      <div class="topbar-search">
-        <span>🔎</span>
-        <input type="text"  placeholder="Cari (tekan / untuk fokus)...">
-      </div>
-    </header>
-
-    <main class="content">
-
-      <!-- ============ DASHBOARD ============ -->
-      <section class="page active" id="page-dashboard">
-        <div id="dashBody"></div>
-      </section>
-
-      <!-- ============ TEST CASE ============ -->
-      <section class="page" id="page-testcase">
-
-        <div id="tcFileListView">
-          <div class="toolbar">
-            <span class="text-dim" style="font-size:13px;">Klik file untuk lihat isinya, atau buat file baru:</span>
-            <div class="spacer"></div>
-            <button class="btn sm primary" id="tcNewFileBtn">+ File Baru</button>
-          </div>
-          <div class="grid" id="tcFileListGrid" style="gap:14px; grid-template-columns:repeat(auto-fit, minmax(220px,1fr));"></div>
-        </div>
-
-        <div id="tcFileDetailView" style="display:none;">
-        <div class="toolbar">
-          <button class="btn sm ghost" id="tcBackToFilesBtn">‹ Semua File</button>
-          <b id="tcActiveFileName" style="margin-right:8px;"></b>
-          <span class="text-faint" id="tcActiveFileHint" style="font-size:12px;"></span>
-        </div>
-        <div class="toolbar">
-          <div class="search-box"><span>🔎</span><input type="text" id="tcSearchInput" placeholder="Cari test case..."></div>
-
-          <div class="dropdown" id="tcFilterDropdown">
-            <button class="btn sm" type="button">▾ Filter</button>
-            <div class="dropdown-panel">
-              <select class="filter-select" id="tcFilterModule" data-label="Semua Module"></select>
-              <select class="filter-select" id="tcFilterTypeTest" data-label="Semua Type Test">
-                <option value="">Semua Type Test</option>
-                <option>Negative</option><option>Positive</option>
-              </select>
-              <select class="filter-select" id="tcFilterStatus" data-label="Semua Status">
-                <option value="">Semua Status</option>
-                <option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option>
-              </select>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  </head>
+  <body class="pre-auth">
+    <div class="login-overlay" id="loginOverlay">
+      <div class="login-split">
+        <div class="login-branding">
+          <div class="sidebar-brand" style="border: none; padding: 0 0 40px">
+            <div class="mark">QA</div>
+            <div>
+              <div class="name">BugRail Application</div>
+              <div class="sub">Test &amp; Bug Suite</div>
             </div>
           </div>
-
-          <div class="spacer"></div>
-          <label class="btn sm" for="tcImportInput">⇩ Import</label>
-          <input type="file" id="tcImportInput" accept=".xlsx,.xls,.csv" hidden>
-
-          <div class="dropdown" id="tcExportDropdown">
-            <button class="btn sm" type="button">⇧ Export</button>
-            <div class="dropdown-panel">
-              <button class="dropdown-item" id="tcExportExcelBtn">⇧ Excel (.xlsx)</button>
-              <button class="dropdown-item" id="tcExportCsvBtn">⇧ CSV</button>
-            </div>
-          </div>
-          <button class="btn sm primary" id="tcAddBtn">+ Test Case</button>
-        </div>
-
-        <div class="bulk-bar" id="tcBulkBar">
-          <span><span class="count">0</span> item terpilih</span>
-          <select class="filter-select" id="tcBulkStatusSelect">
-            <option value="">Ubah status ke...</option>
-            <option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option>
-          </select>
-          <button class="btn sm danger" id="tcBulkDeleteBtn">🗑 Hapus Terpilih</button>
-        </div>
-
-        <div class="table-wrap" id="tcTableWrap">
-          <table class="data-table" id="tcTable">
-            <thead>
-              <tr>
-                <th><input type="checkbox" class="checkbox" id="tcSelectAll"></th>
-                <th class="sortable" data-key="id">ID <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="module">Module <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="roleUser">Role User <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="scenario">Scenario <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="testCase">Test Case <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
-                <th class="sortable col-hidden" data-key="executionDate">Tgl Eksekusi <span class="arrow">↕</span></th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody id="tcTableBody"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="tcEmptyState" style="display:none;">
-          <div class="glyph">☑</div><h4>Belum ada Test Case</h4>
-          <p>Mulai dengan menambah test case baru atau import dari Excel/CSV.</p>
-          <button class="btn primary sm" id="tcEmptyAddBtn">+ Tambah Test Case</button>
-        </div>
-        <div class="flex-between">
-          <span class="text-faint" id="tcResultInfo" style="font-size:12.5px;"></span>
-          <div class="pagination" id="tcPagination"></div>
-        </div>
-        </div>
-      </section>
-
-      <!-- ============ BUG REPORT ============ -->
-      <section class="page" id="page-bugreport">
-
-        <div id="bugFileListView">
-          <div class="toolbar">
-            <span class="text-dim" style="font-size:13px;">Klik file untuk lihat bug report di dalamnya. File dikelola dari halaman Test Case.</span>
-          </div>
-          <div class="grid" id="bugFileListGrid" style="gap:14px; grid-template-columns:repeat(auto-fit, minmax(220px,1fr));"></div>
-        </div>
-
-        <div id="bugFileDetailView" style="display:none;">
-        <div class="toolbar">
-          <button class="btn sm ghost" id="bugBackToFilesBtn">‹ Semua File</button>
-          <b id="bugActiveFileName" style="margin-right:8px;"></b>
-          <span class="text-faint" id="bugActiveFileHint" style="font-size:12px;"></span>
-        </div>
-        <div class="toolbar">
-          <div class="view-toggle" id="bugViewToggle">
-            <button class="active" data-view="table" type="button">☰ Table</button>
-            <button data-view="board" type="button">▤ Board</button>
-          </div>
-          <div class="search-box"><span>🔎</span><input type="text" id="bugSearchInput" placeholder="Cari bug..."></div>
-
-          <div class="dropdown" id="bugFilterDropdown">
-            <button class="btn sm" type="button">▾ Filter</button>
-            <div class="dropdown-panel">
-              <select class="filter-select" id="bugFilterModule" data-label="Semua Module"></select>
-              <select class="filter-select" id="bugFilterSeverity" data-label="Semua Severity">
-                <option value="">Semua Severity</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
-              </select>
-              <select class="filter-select" id="bugFilterPriority" data-label="Semua Priority">
-                <option value="">Semua Priority</option><option>Highest</option><option>High</option><option>Medium</option><option>Low</option>
-              </select>
-              <select class="filter-select" id="bugFilterStatus" data-label="Semua Status">
-                <option value="">Semua Status</option><option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option>
-              </select>
-              <select class="filter-select" id="bugFilterTester" data-label="Semua Tester"></select>
-            </div>
-          </div>
-
-          <div class="spacer"></div>
-
-          <div class="dropdown" id="bugExportDropdown">
-            <button class="btn sm" type="button">⇧ Export</button>
-            <div class="dropdown-panel">
-              <button class="dropdown-item" id="bugExportExcelBtn">⇧ Excel (.xlsx)</button>
-              <button class="dropdown-item" id="bugExportCsvBtn">⇧ CSV</button>
-            </div>
-          </div>
-          <button class="btn sm primary" id="bugAddBtn">+ Bug Report</button>
-        </div>
-
-        <div class="bulk-bar" id="bugBulkBar">
-          <span><span class="count">0</span> item terpilih</span>
-          <select class="filter-select" id="bugBulkStatusSelect">
-            <option value="">Ubah status ke...</option>
-            <option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option>
-          </select>
-          <button class="btn sm danger" id="bugBulkDeleteBtn">🗑 Hapus Terpilih</button>
-        </div>
-
-        <div class="table-wrap" id="bugTableWrap">
-          <table class="data-table" id="bugTable">
-            <thead>
-              <tr>
-                <th><input type="checkbox" class="checkbox" id="bugSelectAll"></th>
-                <th class="sortable" data-key="id">Bug ID <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="testCaseId">Test Case <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="title">Judul <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="module">Module <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="severity">Severity <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="tester">Tester <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="reportDate">Tanggal <span class="arrow">↕</span></th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody id="bugTableBody"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="bugEmptyState" style="display:none;">
-          <div class="glyph">🐞</div><h4>Belum ada Bug Report</h4>
-          <p>Buat bug baru, atau klik "Create Bug" pada Test Case berstatus Failed.</p>
-          <button class="btn primary sm" id="bugEmptyAddBtn">+ Buat Bug Report</button>
-        </div>
-        <div class="flex-between" id="bugTableFooter">
-          <span class="text-faint" id="bugResultInfo" style="font-size:12.5px;"></span>
-          <div class="pagination" id="bugPagination"></div>
-        </div>
-
-        <div class="board-wrap" id="bugBoardWrap" style="display:none;"></div>
-        </div>
-      </section>
-
-      <!-- ============ SUMMARY ============ -->
-      <section class="page" id="page-summary">
-        <div class="toolbar">
-          <select class="filter-select" id="sumFilterFile" data-label="Semua File"></select>
-          <select class="filter-select" id="sumFilterModule" data-label="Semua Module"></select>
-          <select class="filter-select" id="sumFilterTester" data-label="Semua Tester"></select>
-          <input type="date" class="filter-select" id="sumDateFrom">
-          <span class="text-faint">s/d</span>
-          <input type="date" class="filter-select" id="sumDateTo">
-          <div class="spacer"></div>
-          <button class="btn sm primary" id="sumExportPdfBtn">⇧ Export PDF</button>
-        </div>
-        <div id="sumBody"></div>
-      </section>
-
-      <!-- ============ IMPORT & EXPORT ============ -->
-      <section class="page" id="page-importexport">
-        <div class="section-label">Import</div>
-        <div class="card" style="margin-bottom:16px;">
-          <div class="card-head"><h3>Import Test Case</h3><span class="hint">Format: .xlsx atau .csv</span></div>
-          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result</b>. Test Case ID boleh dikosongkan — sistem akan generate otomatis (prefix 3 huruf dari Module).</p>
-          <div class="dropzone" id="importDropzone">
-            <div style="font-size:28px;">⇩</div>
-            <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
-            <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" hidden>
-          </div>
-          <div style="margin-top:14px;">
-            <button class="btn sm" id="importTemplateBtn">⇩ Download Template CSV</button>
-          </div>
-        </div>
-
-        <div class="section-label">Export</div>
-        <div class="grid grid-2col" style="margin-bottom:16px;">
-          <div class="card">
-            <div class="card-head"><h3>Export Test Case</h3></div>
-            <div class="gap-8"><button class="btn sm" id="expTcExcelBtn">⇧ Excel (.xlsx)</button><button class="btn sm" id="expTcCsvBtn">⇧ CSV</button></div>
-          </div>
-          <div class="card">
-            <div class="card-head"><h3>Export Bug Report</h3></div>
-            <div class="gap-8"><button class="btn sm" id="expBugExcelBtn">⇧ Excel (.xlsx)</button><button class="btn sm" id="expBugCsvBtn">⇧ CSV</button></div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-bottom:16px;">
-          <div class="card-head"><h3>Export ke Google Spreadsheet</h3></div>
-          <p class="text-dim" style="font-size:13px;">Cara tercepat: unduh CSV di atas, lalu di Google Sheets pilih <b>File → Import → Upload</b>. Untuk push otomatis tanpa langkah manual, deploy Google Apps Script berikut sebagai Web App, lalu POST data JSON ke URL yang dihasilkan.</p>
-          <pre id="expScriptCode" style="background:var(--surface-alt); border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12px; overflow-x:auto; font-family:var(--font-id);"></pre>
-          <button class="btn sm" id="expCopyScriptBtn">Copy Script</button>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><h3>Backup &amp; Restore (JSON)</h3></div>
-          <p class="text-dim" style="font-size:13px;">Backup menyimpan seluruh data Test Case &amp; Bug Report apa adanya — cocok untuk pindah komputer atau berbagi dengan tim.</p>
-          <div class="gap-8">
-            <button class="btn sm" id="expBackupBtn">⇩ Backup JSON</button>
-            <label class="btn sm" for="expRestoreInput">⇧ Restore JSON</label>
-            <input type="file" id="expRestoreInput" accept=".json" hidden>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ SETTINGS ============ -->
-      <section class="page" id="page-settings">
-        <div class="grid grid-2col">
-          <div class="card">
-            <div class="card-head"><h3>Tampilan</h3></div>
-            <div class="field">
-              <label>Tema</label>
-              <select id="settThemeSelect">
-                <option value="light">Light Mode</option>
-                <option value="dark">Dark Mode</option>
-              </select>
-            </div>
-            <div class="section-label">Keyboard Shortcut</div>
-            <p style="font-size:13px;"><span class="kbd">/</span> fokus ke search &nbsp; <span class="kbd">N</span> tambah item baru &nbsp; <span class="kbd">Ctrl</span>+<span class="kbd">S</span> konfirmasi autosave</p>
-          </div>
-          <div class="card">
-            <div class="card-head"><h3>Data</h3></div>
-            <p style="font-size:13px;">Test Case: <b id="settTcCount">0</b> &nbsp;|&nbsp; Bug Report: <b id="settBugCount">0</b></p>
-            <p class="text-faint" id="settStorageUsage" style="font-size:12.5px;"></p>
-            <button class="btn sm danger" id="settClearBtn">🗑 Hapus Semua Data</button>
-          </div>
-        </div>
-        <div class="card" style="margin-top:16px;">
-          <div class="card-head"><h3>Custom Fields Test Case</h3><span class="hint">Sesuaikan kolom per project</span></div>
-          <p class="text-dim" style="font-size:13px;">Tambah field tambahan di form Test Case, misalnya untuk template project yang beda dari default.</p>
-          <div id="settCustomFieldList" style="margin-bottom:10px;"></div>
-          <div class="gap-8">
-            <input type="text" id="settCustomFieldInput" placeholder="Nama field baru, misal: Test Environment" style="flex:1;">
-            <button class="btn sm" id="settCustomFieldAddBtn">+ Tambah Field</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ MASTER: STATUS BUG REPORT ============ -->
-      <section class="page" id="page-masterstatus">
-        <div class="card">
-          <div class="card-head"><h3>Form Status Bug Report</h3></div>
-          <input type="hidden" id="msEditCode">
-          <div class="form-row">
-            <div class="field">
-              <label>Kode Status</label>
-              <input type="text" id="msCode" readonly placeholder="Otomatis dari Nama Status">
-              <span class="hint">Dibuat otomatis, jadi ID master &mdash; tidak berubah walau nama diedit</span>
-            </div>
-            <div class="field">
-              <label>Nama Status <span class="req">*</span></label>
-              <input type="text" id="msName" placeholder="Masukkan nama status">
-              <span class="hint">Contoh: Open</span>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="field">
-              <label>Warna Label <span class="req">*</span></label>
-              <div class="gap-8">
-                <input type="color" id="msColorPicker" value="#2563EB" style="width:44px; height:38px; padding:2px;">
-                <input type="text" id="msColorHex" value="#2563EB" style="flex:1;">
+          <h1 class="login-headline">
+            Quality Today,<br /><span>Better Tomorrow.</span>
+          </h1>
+          <p class="text-dim" style="font-size: 14px">
+            Centralize your testing process, track bugs, and ship with
+            confidence.
+          </p>
+          <div class="login-features">
+            <div class="login-feature">
+              <span class="glyph">☑</span>
+              <div>
+                <b>Organized Testing</b>
+                <p>Manage test cases, suites, and executions in one place.</p>
               </div>
-              <span class="hint">Digunakan untuk label di daftar bug</span>
+            </div>
+            <div class="login-feature">
+              <span class="glyph">🐞</span>
+              <div>
+                <b>Smart Bug Tracking</b>
+                <p>Report, assign, and resolve bugs faster than ever.</p>
+              </div>
+            </div>
+            <div class="login-feature">
+              <span class="glyph">📊</span>
+              <div>
+                <b>Insightful Reports</b>
+                <p>Get real-time insights and make data-driven decisions.</p>
+              </div>
+            </div>
+          </div>
+          <p class="text-faint login-footer">
+            © 2026 BugRail. All rights reserved.
+          </p>
+        </div>
+
+        <div class="login-card">
+          <div
+            class="sidebar-brand"
+            style="border: none; justify-content: center; padding: 0 0 18px"
+          >
+            <div
+              class="mark"
+              style="
+                width: 52px;
+                height: 52px;
+                border-radius: 16px;
+                font-size: 18px;
+              "
+            >
+              QA
+            </div>
+          </div>
+          <h2 style="text-align: center; margin: 0 0 4px">Welcome back!</h2>
+          <p
+            class="text-dim"
+            style="text-align: center; font-size: 13.5px; margin: 0 0 22px"
+          >
+            Sign in to continue to BugRail
+          </p>
+          <form id="loginForm">
+            <div class="field">
+              <label>Email address</label>
+              <input
+                type="email"
+                id="loginEmail"
+                autocomplete="username"
+                placeholder="Enter your email"
+                required
+              />
             </div>
             <div class="field">
-              <label>Urutan Tampilan <span class="req">*</span></label>
-              <input type="number" id="msOrder" min="1" step="1">
-              <span class="hint">Angka kecil akan tampil lebih dulu</span>
+              <label>Password</label>
+              <div class="login-pw-wrap">
+                <input
+                  type="password"
+                  id="loginPassword"
+                  autocomplete="current-password"
+                  placeholder="Enter your password"
+                  required
+                />
+                <button
+                  type="button"
+                  class="login-pw-toggle"
+                  id="loginPwToggle"
+                >
+                  👁
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="gap-8" style="justify-content:flex-end;">
-            <button class="btn sm ghost" id="msClearBtn">Bersihkan</button>
-            <button class="btn sm primary" id="msSaveBtn">Simpan</button>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top:16px;">
-          <div class="card-head"><h3>Daftar Status Bug Report</h3></div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>No</th><th>Kode Status</th><th>Nama Status</th><th>Warna</th><th>Urutan</th><th>Aksi</th></tr></thead>
-              <tbody id="msTableBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============ USER MANAGEMENT ============ -->
-      <section class="page" id="page-usermanagement">
-        <div class="card" id="settAdminCard">
-          <div class="card-head">
-            <h3>User Management</h3>
-            <div class="flex-between" style="gap:8px;">
-              <span class="hint">Hanya untuk Admin</span>
-              <button class="btn sm primary" id="settUserCreateBtn">+ Tambah User</button>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table" id="settUsersTable">
-              <thead><tr><th>Email</th><th>Role</th><th>Aksi</th></tr></thead>
-              <tbody id="settUsersTableBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-    </main>
-  </div>
-</div>
-
-<div class="fab-wrap" id="fabWrap">
-  <div class="fab-menu" id="fabMenu">
-    <button class="fab-menu-item" id="fabAddTc"><span>📄</span>Test Case</button>
-    <button class="fab-menu-item" id="fabAddBug"><span>🐞</span>Bug Report</button>
-  </div>
-  <!-- <button class="fab" id="globalFab" title="Tambah cepat (N)">+</button> -->
-</div>
-
-<!-- ============ MODAL: Test Case Form ============ -->
-<div class="modal-overlay" id="tcModalOverlay">
-  <div class="modal lg">
-    <div class="modal-header">
-      <h2 id="tcModalTitle">Tambah Test Case</h2>
-      <button class="close-x" data-close="tcModalOverlay">✕</button>
-    </div>
-    <form id="tcForm">
-      <div class="field readonly"><label>Test Case ID</label><input type="text" id="tcFieldId" disabled></div>
-      <div class="form-row">
-        <div class="field">
-          <label>Module <span class="req">*</span></label>
-          <div class="dropdown combobox" id="tcModuleDropdown">
-            <button type="button" class="combobox-trigger" id="tcModuleTrigger">
-              <span id="tcModuleTriggerText" class="text-faint">Select Module</span>
-              <span class="arrow">▾</span>
+            <p
+              class="text-faint"
+              id="loginError"
+              style="font-size: 12.5px; min-height: 16px; margin: 2px 0 10px"
+            ></p>
+            <button type="submit" class="btn primary" style="width: 100%">
+              Sign in
             </button>
-            <div class="dropdown-panel combobox-panel">
-              <div class="search-box"><span>🔎</span><input type="text" id="tcModuleSearch" placeholder="Cari module..."></div>
-              <div id="tcModuleList" class="combobox-list"></div>
-              <button type="button" class="combobox-add" id="tcModuleAddBtn">+ Tambah module baru</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-shell">
+      <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+      <!-- ============ SIDEBAR ============ -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+          <div class="mark">QA</div>
+          <div>
+            <div class="name">BugRail Application</div>
+            <div class="sub">Test &amp; Bug Suite</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <div class="nav-item" data-page="dashboard">
+            <span class="icon">▦</span> Dashboard
+          </div>
+          <div class="nav-item" data-page="testcase">
+            <span class="icon">☑</span> Test Case
+          </div>
+          <div class="nav-item" data-page="bugreport">
+            <span class="icon">🐞</span> Bug Report
+          </div>
+          <div class="nav-item" data-page="summary">
+            <span class="icon">📊</span> Summary
+          </div>
+          <!-- <div class="nav-item" data-page="importexport"><span class="icon">⇅</span> Import &amp; Export</div> -->
+          <div class="nav-group" id="navGroupMaster">
+            <div class="nav-item nav-group-toggle">
+              <span class="icon">🗂</span> Master <span class="arrow">▾</span>
+            </div>
+            <div class="nav-subitem" data-page="masterstatus">
+              Status Bug Report
             </div>
           </div>
-          <input type="hidden" name="module">
-          <p class="combobox-error" id="tcModuleError" style="display:none;"></p>
+          <div
+            class="nav-item"
+            data-page="usermanagement"
+            id="navUserManagement"
+            style="display: none"
+          >
+            <span class="icon">👤</span> User Management
+          </div>
+          <div class="nav-item" data-page="settings">
+            <span class="icon">⚙</span> Settings
+          </div>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="auth-badge" id="authBadge"></div>
+          <div class="theme-toggle" id="themeToggleBtn">
+            <span
+              ><span id="themeIcon">☀️</span>
+              <span id="themeLabel">Light Mode</span></span
+            >
+            <span>⇄</span>
+          </div>
         </div>
-        <div class="field"><label>Role User</label><input name="roleUser"></div>
-      </div>
-      <div class="field"><label>Scenario <span class="req">*</span></label><textarea name="scenario" required></textarea></div>
-      <div class="field"><label>Test Case<span class="req">*</span></label><textarea name="testCase" required></textarea></div>
-      <div class="field"><label>Pre-Condiction</label><textarea name="preconditions"></textarea></div>
-      <div class="field"><label>Test Step</label><textarea name="steps"></textarea></div>
-      <div class="field"><label>Test Data</label><textarea name="testData"></textarea></div>
-      <div class="form-row">
-        <div class="field"><label>Type Test</label>
-          <select name="typeTest"><option>Negative</option><option>Positive</option></select>
-        </div>
-        <div class="field"><label>Status</label>
-          <select name="status"><option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option></select>
-        </div>
-      </div>
-      <div class="field"><label>Expected Result</label><textarea name="expectedResult"></textarea></div>
-      <div class="form-row">
-        <div class="field"><label>Actual Result</label><textarea name="actualResult"></textarea></div>
-        <div class="field"><label>Execution Date</label><input type="date" name="executionDate"></div>
-      </div>
-      <div id="tcCustomFieldsWrap"></div>
-      <div class="modal-footer">
-        <button type="button" class="btn" data-close="tcModalOverlay">Batal</button>
-        <button type="submit" class="btn primary">Simpan Test Case</button>
-      </div>
-    </form>
-  </div>
-</div>
+      </aside>
 
-<!-- ============ MODAL: Quick Execute (Run) ============ -->
-<div class="modal-overlay" id="runModalOverlay">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="runModalTitle">Execute Test Case</h2>
-      <button class="close-x" data-close="runModalOverlay">✕</button>
+      <!-- ============ MAIN ============ -->
+      <div class="main">
+        <header class="topbar">
+          <button class="hamburger" id="hamburgerBtn">☰</button>
+          <div>
+            <div class="page-title" id="pageTitle">Dashboard</div>
+            <div class="page-sub" id="pageSub">
+              Ringkasan status pengujian &amp; bug secara realtime
+            </div>
+          </div>
+          <div class="topbar-search">
+            <span>🔎</span>
+            <input type="text" placeholder="Cari (tekan / untuk fokus)..." />
+          </div>
+        </header>
+
+        <main class="content">
+          <!-- ============ DASHBOARD ============ -->
+          <section class="page active" id="page-dashboard">
+            <div id="dashBody"></div>
+          </section>
+
+          <!-- ============ TEST CASE ============ -->
+          <section class="page" id="page-testcase">
+            <div id="tcFileListView">
+              <div class="toolbar">
+                <span class="text-dim" style="font-size: 13px"
+                  >Klik file untuk lihat isinya, atau buat file baru:</span
+                >
+                <div class="spacer"></div>
+                <button class="btn sm primary" id="tcNewFileBtn">
+                  + File Baru
+                </button>
+              </div>
+              <div
+                class="grid"
+                id="tcFileListGrid"
+                style="
+                  gap: 14px;
+                  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                "
+              ></div>
+            </div>
+
+            <div id="tcFileDetailView" style="display: none">
+              <div class="toolbar">
+                <button class="btn sm ghost" id="tcBackToFilesBtn">
+                  ‹ Semua File
+                </button>
+                <b id="tcActiveFileName" style="margin-right: 8px"></b>
+                <span
+                  class="text-faint"
+                  id="tcActiveFileHint"
+                  style="font-size: 12px"
+                ></span>
+              </div>
+              <div class="toolbar">
+                <div class="search-box">
+                  <span>🔎</span
+                  ><input
+                    type="text"
+                    id="tcSearchInput"
+                    placeholder="Cari test case..."
+                  />
+                </div>
+
+                <div class="dropdown" id="tcFilterDropdown">
+                  <button class="btn sm" type="button">▾ Filter</button>
+                  <div class="dropdown-panel">
+                    <select
+                      class="filter-select"
+                      id="tcFilterModule"
+                      data-label="Semua Module"
+                    ></select>
+                    <select
+                      class="filter-select"
+                      id="tcFilterTypeTest"
+                      data-label="Semua Type Test"
+                    >
+                      <option value="">Semua Type Test</option>
+                      <option>Negative</option>
+                      <option>Positive</option>
+                    </select>
+                    <select
+                      class="filter-select"
+                      id="tcFilterStatus"
+                      data-label="Semua Status"
+                    >
+                      <option value="">Semua Status</option>
+                      <option>Open</option>
+                      <option>Passed</option>
+                      <option>Failed</option>
+                      <option>Blocked</option>
+                      <option>Retest</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="spacer"></div>
+                <label class="btn sm" for="tcImportInput">⇩ Import</label>
+                <input
+                  type="file"
+                  id="tcImportInput"
+                  accept=".xlsx,.xls,.csv"
+                  hidden
+                />
+
+                <div class="dropdown" id="tcExportDropdown">
+                  <button class="btn sm" type="button">⇧ Export</button>
+                  <div class="dropdown-panel">
+                    <button class="dropdown-item" id="tcExportExcelBtn">
+                      ⇧ Excel (.xlsx)
+                    </button>
+                    <button class="dropdown-item" id="tcExportCsvBtn">
+                      ⇧ CSV
+                    </button>
+                  </div>
+                </div>
+                <button class="btn sm primary" id="tcAddBtn">
+                  + Test Case
+                </button>
+              </div>
+
+              <div class="bulk-bar" id="tcBulkBar">
+                <span><span class="count">0</span> item terpilih</span>
+                <select class="filter-select" id="tcBulkStatusSelect">
+                  <option value="">Ubah status ke...</option>
+                  <option>Open</option>
+                  <option>Passed</option>
+                  <option>Failed</option>
+                  <option>Blocked</option>
+                  <option>Retest</option>
+                </select>
+                <button class="btn sm danger" id="tcBulkDeleteBtn">
+                  🗑 Hapus Terpilih
+                </button>
+              </div>
+
+              <div class="table-wrap" id="tcTableWrap">
+                <table class="data-table" id="tcTable">
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          type="checkbox"
+                          class="checkbox"
+                          id="tcSelectAll"
+                        />
+                      </th>
+                      <th class="sortable" data-key="id">
+                        ID <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="module">
+                        Module <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="roleUser">
+                        Role User <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="scenario">
+                        Scenario <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="testCase">
+                        Test Case <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="typeTest">
+                        Type Test <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="status">
+                        Status <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable col-hidden" data-key="executionDate">
+                        Tgl Eksekusi <span class="arrow">↕</span>
+                      </th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tcTableBody"></tbody>
+                </table>
+              </div>
+              <div class="empty-state" id="tcEmptyState" style="display: none">
+                <div class="glyph">☑</div>
+                <h4>Belum ada Test Case</h4>
+                <p>
+                  Mulai dengan menambah test case baru atau import dari
+                  Excel/CSV.
+                </p>
+                <button class="btn primary sm" id="tcEmptyAddBtn">
+                  + Tambah Test Case
+                </button>
+              </div>
+              <div class="flex-between">
+                <span
+                  class="text-faint"
+                  id="tcResultInfo"
+                  style="font-size: 12.5px"
+                ></span>
+                <div class="pagination" id="tcPagination"></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ BUG REPORT ============ -->
+          <section class="page" id="page-bugreport">
+            <div id="bugFileListView">
+              <div class="toolbar">
+                <span class="text-dim" style="font-size: 13px"
+                  >Klik file untuk lihat bug report di dalamnya. File dikelola
+                  dari halaman Test Case.</span
+                >
+              </div>
+              <div
+                class="grid"
+                id="bugFileListGrid"
+                style="
+                  gap: 14px;
+                  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                "
+              ></div>
+            </div>
+
+            <div id="bugFileDetailView" style="display: none">
+              <div class="toolbar">
+                <button class="btn sm ghost" id="bugBackToFilesBtn">
+                  ‹ Semua File
+                </button>
+                <b id="bugActiveFileName" style="margin-right: 8px"></b>
+                <span
+                  class="text-faint"
+                  id="bugActiveFileHint"
+                  style="font-size: 12px"
+                ></span>
+              </div>
+              <div class="toolbar">
+                <div class="view-toggle" id="bugViewToggle">
+                  <button class="active" data-view="table" type="button">
+                    ☰ Table
+                  </button>
+                  <button data-view="board" type="button">▤ Board</button>
+                </div>
+                <div class="search-box">
+                  <span>🔎</span
+                  ><input
+                    type="text"
+                    id="bugSearchInput"
+                    placeholder="Cari bug..."
+                  />
+                </div>
+
+                <div class="dropdown" id="bugFilterDropdown">
+                  <button class="btn sm" type="button">▾ Filter</button>
+                  <div class="dropdown-panel">
+                    <select
+                      class="filter-select"
+                      id="bugFilterModule"
+                      data-label="Semua Module"
+                    ></select>
+                    <select
+                      class="filter-select"
+                      id="bugFilterSeverity"
+                      data-label="Semua Severity"
+                    >
+                      <option value="">Semua Severity</option>
+                      <option>Critical</option>
+                      <option>High</option>
+                      <option>Medium</option>
+                      <option>Low</option>
+                    </select>
+                    <select
+                      class="filter-select"
+                      id="bugFilterPriority"
+                      data-label="Semua Priority"
+                    >
+                      <option value="">Semua Priority</option>
+                      <option>Highest</option>
+                      <option>High</option>
+                      <option>Medium</option>
+                      <option>Low</option>
+                    </select>
+                    <select
+                      class="filter-select"
+                      id="bugFilterStatus"
+                      data-label="Semua Status"
+                    >
+                      <option value="">Semua Status</option>
+                      <option>Open</option>
+                      <option>Assigned</option>
+                      <option>In Progress</option>
+                      <option>Ready To Test</option>
+                      <option>Reopened</option>
+                      <option>Closed</option>
+                    </select>
+                    <select
+                      class="filter-select"
+                      id="bugFilterTester"
+                      data-label="Semua Tester"
+                    ></select>
+                  </div>
+                </div>
+
+                <div class="spacer"></div>
+
+                <div class="dropdown" id="bugExportDropdown">
+                  <button class="btn sm" type="button">⇧ Export</button>
+                  <div class="dropdown-panel">
+                    <button class="dropdown-item" id="bugExportExcelBtn">
+                      ⇧ Excel (.xlsx)
+                    </button>
+                    <button class="dropdown-item" id="bugExportCsvBtn">
+                      ⇧ CSV
+                    </button>
+                  </div>
+                </div>
+                <button class="btn sm primary" id="bugAddBtn">
+                  + Bug Report
+                </button>
+              </div>
+
+              <div class="bulk-bar" id="bugBulkBar">
+                <span><span class="count">0</span> item terpilih</span>
+                <select class="filter-select" id="bugBulkStatusSelect">
+                  <option value="">Ubah status ke...</option>
+                  <option>Open</option>
+                  <option>Assigned</option>
+                  <option>In Progress</option>
+                  <option>Ready To Test</option>
+                  <option>Reopened</option>
+                  <option>Closed</option>
+                </select>
+                <button class="btn sm danger" id="bugBulkDeleteBtn">
+                  🗑 Hapus Terpilih
+                </button>
+              </div>
+
+              <div class="table-wrap" id="bugTableWrap">
+                <table class="data-table" id="bugTable">
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          type="checkbox"
+                          class="checkbox"
+                          id="bugSelectAll"
+                        />
+                      </th>
+                      <th class="sortable" data-key="id">
+                        Bug ID <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="testCaseId">
+                        Test Case <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="title">
+                        Judul <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="module">
+                        Module <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="severity">
+                        Severity <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="status">
+                        Status <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="tester">
+                        Tester <span class="arrow">↕</span>
+                      </th>
+                      <th class="sortable" data-key="reportDate">
+                        Tanggal <span class="arrow">↕</span>
+                      </th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bugTableBody"></tbody>
+                </table>
+              </div>
+              <div class="empty-state" id="bugEmptyState" style="display: none">
+                <div class="glyph">🐞</div>
+                <h4>Belum ada Bug Report</h4>
+                <p>
+                  Buat bug baru, atau klik "Create Bug" pada Test Case berstatus
+                  Failed.
+                </p>
+                <button class="btn primary sm" id="bugEmptyAddBtn">
+                  + Buat Bug Report
+                </button>
+              </div>
+              <div class="flex-between" id="bugTableFooter">
+                <span
+                  class="text-faint"
+                  id="bugResultInfo"
+                  style="font-size: 12.5px"
+                ></span>
+                <div class="pagination" id="bugPagination"></div>
+              </div>
+
+              <div
+                class="board-wrap"
+                id="bugBoardWrap"
+                style="display: none"
+              ></div>
+            </div>
+          </section>
+
+          <!-- ============ SUMMARY ============ -->
+          <section class="page" id="page-summary">
+            <div class="toolbar">
+              <select
+                class="filter-select"
+                id="sumFilterFile"
+                data-label="Semua File"
+              ></select>
+              <select
+                class="filter-select"
+                id="sumFilterModule"
+                data-label="Semua Module"
+              ></select>
+              <select
+                class="filter-select"
+                id="sumFilterTester"
+                data-label="Semua Tester"
+              ></select>
+              <input type="date" class="filter-select" id="sumDateFrom" />
+              <span class="text-faint">s/d</span>
+              <input type="date" class="filter-select" id="sumDateTo" />
+              <div class="spacer"></div>
+              <button class="btn sm primary" id="sumExportPdfBtn">
+                ⇧ Export PDF
+              </button>
+            </div>
+            <div id="sumBody"></div>
+          </section>
+
+          <!-- ============ IMPORT & EXPORT ============ -->
+          <section class="page" id="page-importexport">
+            <div class="section-label">Import</div>
+            <div class="card" style="margin-bottom: 16px">
+              <div class="card-head">
+                <h3>Import Test Case</h3>
+                <span class="hint">Format: .xlsx atau .csv</span>
+              </div>
+              <p class="text-dim" style="font-size: 13px">
+                Kolom yang didukung:
+                <b
+                  >Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test
+                  Step, Test Data, Type Test, Expected Result</b
+                >. Test Case ID boleh dikosongkan — sistem akan generate
+                otomatis (prefix 3 huruf dari Module).
+              </p>
+              <div class="dropzone" id="importDropzone">
+                <div style="font-size: 28px">⇩</div>
+                <div>
+                  <b>Drag &amp; drop</b> file di sini, atau klik untuk memilih
+                  file
+                </div>
+                <input
+                  type="file"
+                  id="importFileInput"
+                  accept=".xlsx,.xls,.csv"
+                  hidden
+                />
+              </div>
+              <div style="margin-top: 14px">
+                <button class="btn sm" id="importTemplateBtn">
+                  ⇩ Download Template CSV
+                </button>
+              </div>
+            </div>
+
+            <div class="section-label">Export</div>
+            <div class="grid grid-2col" style="margin-bottom: 16px">
+              <div class="card">
+                <div class="card-head"><h3>Export Test Case</h3></div>
+                <div class="gap-8">
+                  <button class="btn sm" id="expTcExcelBtn">
+                    ⇧ Excel (.xlsx)</button
+                  ><button class="btn sm" id="expTcCsvBtn">⇧ CSV</button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head"><h3>Export Bug Report</h3></div>
+                <div class="gap-8">
+                  <button class="btn sm" id="expBugExcelBtn">
+                    ⇧ Excel (.xlsx)</button
+                  ><button class="btn sm" id="expBugCsvBtn">⇧ CSV</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-bottom: 16px">
+              <div class="card-head"><h3>Export ke Google Spreadsheet</h3></div>
+              <p class="text-dim" style="font-size: 13px">
+                Cara tercepat: unduh CSV di atas, lalu di Google Sheets pilih
+                <b>File → Import → Upload</b>. Untuk push otomatis tanpa langkah
+                manual, deploy Google Apps Script berikut sebagai Web App, lalu
+                POST data JSON ke URL yang dihasilkan.
+              </p>
+              <pre
+                id="expScriptCode"
+                style="
+                  background: var(--surface-alt);
+                  border: 1px solid var(--border);
+                  border-radius: 8px;
+                  padding: 12px;
+                  font-size: 12px;
+                  overflow-x: auto;
+                  font-family: var(--font-id);
+                "
+              ></pre>
+              <button class="btn sm" id="expCopyScriptBtn">Copy Script</button>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><h3>Backup &amp; Restore (JSON)</h3></div>
+              <p class="text-dim" style="font-size: 13px">
+                Backup menyimpan seluruh data Test Case &amp; Bug Report apa
+                adanya — cocok untuk pindah komputer atau berbagi dengan tim.
+              </p>
+              <div class="gap-8">
+                <button class="btn sm" id="expBackupBtn">⇩ Backup JSON</button>
+                <label class="btn sm" for="expRestoreInput"
+                  >⇧ Restore JSON</label
+                >
+                <input type="file" id="expRestoreInput" accept=".json" hidden />
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ SETTINGS ============ -->
+          <section class="page" id="page-settings">
+            <div class="grid grid-2col">
+              <div class="card">
+                <div class="card-head"><h3>Tampilan</h3></div>
+                <div class="field">
+                  <label>Tema</label>
+                  <select id="settThemeSelect">
+                    <option value="light">Light Mode</option>
+                    <option value="dark">Dark Mode</option>
+                  </select>
+                </div>
+                <div class="section-label">Keyboard Shortcut</div>
+                <p style="font-size: 13px">
+                  <span class="kbd">/</span> fokus ke search &nbsp;
+                  <span class="kbd">N</span> tambah item baru &nbsp;
+                  <span class="kbd">Ctrl</span>+<span class="kbd">S</span>
+                  konfirmasi autosave
+                </p>
+              </div>
+              <div class="card">
+                <div class="card-head"><h3>Data</h3></div>
+                <p style="font-size: 13px">
+                  Test Case: <b id="settTcCount">0</b> &nbsp;|&nbsp; Bug Report:
+                  <b id="settBugCount">0</b>
+                </p>
+                <p
+                  class="text-faint"
+                  id="settStorageUsage"
+                  style="font-size: 12.5px"
+                ></p>
+                <button class="btn sm danger" id="settClearBtn">
+                  🗑 Hapus Semua Data
+                </button>
+              </div>
+            </div>
+            <div class="card" style="margin-top: 16px">
+              <div class="card-head">
+                <h3>Custom Fields Test Case</h3>
+                <span class="hint">Sesuaikan kolom per project</span>
+              </div>
+              <p class="text-dim" style="font-size: 13px">
+                Tambah field tambahan di form Test Case, misalnya untuk template
+                project yang beda dari default.
+              </p>
+              <div id="settCustomFieldList" style="margin-bottom: 10px"></div>
+              <div class="gap-8">
+                <input
+                  type="text"
+                  id="settCustomFieldInput"
+                  placeholder="Nama field baru, misal: Test Environment"
+                  style="flex: 1"
+                />
+                <button class="btn sm" id="settCustomFieldAddBtn">
+                  + Tambah Field
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ MASTER: STATUS BUG REPORT ============ -->
+          <section class="page" id="page-masterstatus">
+            <div class="card">
+              <div class="card-head"><h3>Form Status Bug Report</h3></div>
+              <input type="hidden" id="msEditCode" />
+              <div class="form-row">
+                <div class="field">
+                  <label>Kode Status</label>
+                  <input
+                    type="text"
+                    id="msCode"
+                    readonly
+                    placeholder="Otomatis dari Nama Status"
+                  />
+                  <span class="hint"
+                    >Dibuat otomatis, jadi ID master &mdash; tidak berubah walau
+                    nama diedit</span
+                  >
+                </div>
+                <div class="field">
+                  <label>Nama Status <span class="req">*</span></label>
+                  <input
+                    type="text"
+                    id="msName"
+                    placeholder="Masukkan nama status"
+                  />
+                  <span class="hint">Contoh: Open</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field">
+                  <label>Warna Label <span class="req">*</span></label>
+                  <div class="gap-8">
+                    <input
+                      type="color"
+                      id="msColorPicker"
+                      value="#2563EB"
+                      style="width: 44px; height: 38px; padding: 2px"
+                    />
+                    <input
+                      type="text"
+                      id="msColorHex"
+                      value="#2563EB"
+                      style="flex: 1"
+                    />
+                  </div>
+                  <span class="hint">Digunakan untuk label di daftar bug</span>
+                </div>
+                <div class="field">
+                  <label>Urutan Tampilan <span class="req">*</span></label>
+                  <input type="number" id="msOrder" min="1" step="1" />
+                  <span class="hint">Angka kecil akan tampil lebih dulu</span>
+                </div>
+              </div>
+              <div class="gap-8" style="justify-content: flex-end">
+                <button class="btn sm ghost" id="msClearBtn">Bersihkan</button>
+                <button class="btn sm primary" id="msSaveBtn">Simpan</button>
+              </div>
+            </div>
+
+            <div class="card" style="margin-top: 16px">
+              <div class="card-head"><h3>Daftar Status Bug Report</h3></div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>No</th>
+                      <th>Kode Status</th>
+                      <th>Nama Status</th>
+                      <th>Warna</th>
+                      <th>Urutan</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="msTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ USER MANAGEMENT ============ -->
+          <section class="page" id="page-usermanagement">
+            <div class="card" id="settAdminCard">
+              <div class="card-head">
+                <h3>User Management</h3>
+                <div class="flex-between" style="gap: 8px">
+                  <span class="hint">Hanya untuk Admin</span>
+                  <button class="btn sm primary" id="settUserCreateBtn">
+                    + Tambah User
+                  </button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table" id="settUsersTable">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="settUsersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
     </div>
-    <div class="field readonly"><label>Scenario</label><div id="runScenario" style="font-size:13.5px; padding:9px 0;"></div></div>
-    <div class="field readonly"><label>Expected Result</label><div id="runExpected" style="font-size:13.5px; padding:9px 0; color:var(--text-dim);"></div></div>
-    <div class="divider"></div>
-    <form id="runForm">
-      <div class="field"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult" required></textarea></div>
-      <div class="field"><label>Status <span class="req">*</span></label>
-        <select name="status" required><option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option></select>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn" data-close="runModalOverlay">Batal</button>
-        <button type="submit" class="btn primary">Simpan Hasil</button>
-      </div>
-    </form>
-  </div>
-</div>
 
-<!-- ============ MODAL: Bug Report Form ============ -->
-<div class="modal-overlay" id="bugModalOverlay">
-  <div class="modal lg">
-    <div class="modal-header">
-      <h2 id="bugModalTitle">Buat Bug Report</h2>
-      <button class="close-x" data-close="bugModalOverlay">✕</button>
+    <div class="fab-wrap" id="fabWrap">
+      <div class="fab-menu" id="fabMenu">
+        <button class="fab-menu-item" id="fabAddTc">
+          <span>📄</span>Test Case
+        </button>
+        <button class="fab-menu-item" id="fabAddBug">
+          <span>🐞</span>Bug Report
+        </button>
+      </div>
+      <!-- <button class="fab" id="globalFab" title="Tambah cepat (N)">+</button> -->
     </div>
-    <form id="bugForm">
-      <div class="form-row">
-        <div class="field readonly"><label>Bug ID</label><input type="text" id="bugFieldId" disabled></div>
-        <div class="field readonly"><label>Report Date</label><input type="text" id="bugFieldDate" disabled></div>
-      </div>
-      <div class="field">
-        <label>Pilih Test Case (opsional, mengisi field otomatis)</label>
-        <select name="testCaseId" id="bugTestCaseSelect"></select>
-      </div>
 
-      <div class="section-label">Terisi otomatis dari Test Case</div>
-      <div class="field readonly"><label>Module</label><input name="module" readonly></div>
-      <div class="field readonly"><label>Scenario</label><textarea name="scenario" readonly></textarea></div>
-      <div class="form-row">
-        <div class="field readonly"><label>Test Steps</label><textarea name="stepsRef" readonly></textarea></div>
-        <div class="field readonly"><label>Expected Result</label><textarea name="expectedResultRef" readonly></textarea></div>
-      </div>
-      <div class="field readonly"><label>Tester</label><input name="tester" readonly></div>
-
-      <div class="section-label">Diisi oleh Tester</div>
-      <div class="field"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult" required></textarea></div>
-      <div class="field"><label>Bug Title <span class="req">*</span></label><input name="title" required></div>
-      <div class="field"><label>Description</label><textarea name="description"></textarea></div>
-      <div class="form-row">
-        <div class="field"><label>Severity</label>
-          <select name="severity"><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
+    <!-- ============ MODAL: Test Case Form ============ -->
+    <div class="modal-overlay" id="tcModalOverlay">
+      <div class="modal lg">
+        <div class="modal-header">
+          <h2 id="tcModalTitle">Tambah Test Case</h2>
+          <button class="close-x" data-close="tcModalOverlay">✕</button>
         </div>
-        <div class="field"><label>Priority</label>
-          <select name="priority"><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
-        </div>
+        <form id="tcForm">
+          <div class="field readonly">
+            <label>Test Case ID</label
+            ><input type="text" id="tcFieldId" disabled />
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Module <span class="req">*</span></label>
+              <div class="dropdown combobox" id="tcModuleDropdown">
+                <button
+                  type="button"
+                  class="combobox-trigger"
+                  id="tcModuleTrigger"
+                >
+                  <span id="tcModuleTriggerText" class="text-faint"
+                    >Select Module</span
+                  >
+                  <span class="arrow">▾</span>
+                </button>
+                <div class="dropdown-panel combobox-panel">
+                  <div class="search-box">
+                    <span>🔎</span
+                    ><input
+                      type="text"
+                      id="tcModuleSearch"
+                      placeholder="Cari module..."
+                    />
+                  </div>
+                  <div id="tcModuleList" class="combobox-list"></div>
+                  <button
+                    type="button"
+                    class="combobox-add"
+                    id="tcModuleAddBtn"
+                  >
+                    + Tambah module baru
+                  </button>
+                </div>
+              </div>
+              <input type="hidden" name="module" />
+              <p
+                class="combobox-error"
+                id="tcModuleError"
+                style="display: none"
+              ></p>
+            </div>
+            <div class="field">
+              <label>Role User</label><input name="roleUser" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Scenario <span class="req">*</span></label
+            ><textarea name="scenario" required></textarea>
+          </div>
+          <div class="field">
+            <label>Test Case<span class="req">*</span></label
+            ><textarea name="testCase" required></textarea>
+          </div>
+          <div class="field">
+            <label>Pre-Condiction</label
+            ><textarea name="preconditions"></textarea>
+          </div>
+          <div class="field">
+            <label>Test Step</label><textarea name="steps"></textarea>
+          </div>
+          <div class="field">
+            <label>Test Data</label><textarea name="testData"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Type Test</label>
+              <select name="typeTest">
+                <option>Negative</option>
+                <option>Positive</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select name="status">
+                <option>Open</option>
+                <option>Passed</option>
+                <option>Failed</option>
+                <option>Blocked</option>
+                <option>Retest</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Expected Result</label
+            ><textarea name="expectedResult"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Actual Result</label
+              ><textarea name="actualResult"></textarea>
+            </div>
+            <div class="field">
+              <label>Execution Date</label
+              ><input type="date" name="executionDate" />
+            </div>
+          </div>
+          <div id="tcCustomFieldsWrap"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn" data-close="tcModalOverlay">
+              Batal
+            </button>
+            <button type="submit" class="btn primary">Simpan Test Case</button>
+          </div>
+        </form>
       </div>
-      <div class="field"><label>Status</label>
-        <select name="status"><option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option></select>
-      </div>
-      <div class="form-row">
-        <div class="field"><label>Environment</label><input name="environment" placeholder="Staging / Production"></div>
-        <div class="field"><label>Browser</label><input name="browser" placeholder="Chrome 126"></div>
-      </div>
-      <div class="form-row">
-        <div class="field"><label>OS</label><input name="os" placeholder="Android 14"></div>
-        <div class="field"><label>Device</label><input name="device" placeholder="Samsung A54"></div>
-      </div>
-      <div class="field"><label>Build Version</label><input name="buildVersion" placeholder="v1.2.3"></div>
-
-      <div class="field">
-        <label>Attachment (link Ligshoot / screenshot / video)</label>
-        <textarea name="attachments" placeholder="Tempel link Ligshoot di sini, satu link per baris"></textarea>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn" data-close="bugModalOverlay">Batal</button>
-        <button type="submit" class="btn primary">Simpan Bug Report</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- ============ MODAL: Bug Report Detail (read-only) ============ -->
-<div class="modal-overlay" id="bugDetailModalOverlay">
-  <div class="modal lg">
-    <div class="modal-header">
-      <h2 id="bugDetailTitle">Detail Bug Report</h2>
-      <button class="close-x" data-close="bugDetailModalOverlay">✕</button>
     </div>
-    <div id="bugDetailBody" class="bug-detail-body"></div>
-    <div class="modal-footer">
-      <!-- <button type="button" class="btn" >Tutup1</button>
+
+    <!-- ============ MODAL: Quick Execute (Run) ============ -->
+    <div class="modal-overlay" id="runModalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="runModalTitle">Execute Test Case</h2>
+          <button class="close-x" data-close="runModalOverlay">✕</button>
+        </div>
+        <div class="field readonly">
+          <label>Scenario</label>
+          <div id="runScenario" style="font-size: 13.5px; padding: 9px 0"></div>
+        </div>
+        <div class="field readonly">
+          <label>Expected Result</label>
+          <div
+            id="runExpected"
+            style="font-size: 13.5px; padding: 9px 0; color: var(--text-dim)"
+          ></div>
+        </div>
+        <div class="divider"></div>
+        <form id="runForm">
+          <div class="field">
+            <label>Actual Result <span class="req">*</span></label
+            ><textarea name="actualResult" required></textarea>
+          </div>
+          <div class="field">
+            <label>Status <span class="req">*</span></label>
+            <select name="status" required>
+              <option>Open</option>
+              <option>Passed</option>
+              <option>Failed</option>
+              <option>Blocked</option>
+              <option>Retest</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn" data-close="runModalOverlay">
+              Batal
+            </button>
+            <button type="submit" class="btn primary">Simpan Hasil</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ============ MODAL: Bug Report Form ============ -->
+    <div class="modal-overlay" id="bugModalOverlay">
+      <div class="modal lg">
+        <div class="modal-header">
+          <h2 id="bugModalTitle">Buat Bug Report</h2>
+          <button class="close-x" data-close="bugModalOverlay">✕</button>
+        </div>
+        <form id="bugForm">
+          <div class="form-row">
+            <div class="field readonly">
+              <label>Bug ID</label
+              ><input type="text" id="bugFieldId" disabled />
+            </div>
+            <div class="field readonly">
+              <label>Report Date</label
+              ><input type="text" id="bugFieldDate" disabled />
+            </div>
+          </div>
+          <div class="field">
+            <label>Pilih Test Case (opsional, mengisi field otomatis)</label>
+            <select name="testCaseId" id="bugTestCaseSelect"></select>
+          </div>
+
+          <div class="section-label">Terisi otomatis dari Test Case</div>
+          <div class="field readonly">
+            <label>Module</label><input name="module" readonly />
+          </div>
+          <div class="field readonly">
+            <label>Scenario</label
+            ><textarea name="scenario" readonly></textarea>
+          </div>
+          <div class="form-row">
+            <div class="field readonly">
+              <label>Test Steps</label
+              ><textarea name="stepsRef" readonly></textarea>
+            </div>
+            <div class="field readonly">
+              <label>Expected Result</label
+              ><textarea name="expectedResultRef" readonly></textarea>
+            </div>
+          </div>
+          <div class="field readonly">
+            <label>Tester</label><input name="tester" readonly />
+          </div>
+
+          <div class="section-label">Diisi oleh Tester</div>
+          <div class="field">
+            <label>Actual Result <span class="req">*</span></label
+            ><textarea name="actualResult" required></textarea>
+          </div>
+          <div class="field">
+            <label>Bug Title <span class="req">*</span></label
+            ><input name="title" required />
+          </div>
+          <div class="field">
+            <label>Description</label><textarea name="description"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Severity</label>
+              <select name="severity">
+                <option>Critical</option>
+                <option>High</option>
+                <option>Medium</option>
+                <option>Low</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Priority</label>
+              <select name="priority">
+                <option>Critical</option>
+                <option>High</option>
+                <option>Medium</option>
+                <option>Low</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Status</label>
+            <select name="status">
+              <option>Open</option>
+              <option>Assigned</option>
+              <option>In Progress</option>
+              <option>Ready To Test</option>
+              <option>Reopened</option>
+              <option>Closed</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Environment</label
+              ><input name="environment" placeholder="Staging / Production" />
+            </div>
+            <div class="field">
+              <label>Browser</label
+              ><input name="browser" placeholder="Chrome 126" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>OS</label><input name="os" placeholder="Android 14" />
+            </div>
+            <div class="field">
+              <label>Device</label
+              ><input name="device" placeholder="Samsung A54" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Build Version</label
+            ><input name="buildVersion" placeholder="v1.2.3" />
+          </div>
+
+          <div class="field">
+            <label>Attachment (link Ligshoot / screenshot / video)</label>
+            <textarea
+              name="attachments"
+              placeholder="Tempel link Ligshoot di sini, satu link per baris"
+            ></textarea>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn" data-close="bugModalOverlay">
+              Batal
+            </button>
+            <button type="submit" class="btn primary">Simpan Bug Report</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ============ MODAL: Bug Report Detail (read-only) ============ -->
+    <div class="modal-overlay" id="bugDetailModalOverlay">
+      <div class="modal lg">
+        <div class="modal-header">
+          <h2 id="bugDetailTitle">Detail Bug Report</h2>
+          <button class="close-x" data-close="bugDetailModalOverlay">✕</button>
+        </div>
+        <div id="bugDetailBody" class="bug-detail-body"></div>
+        <div class="modal-footer">
+          <!-- <button type="button" class="btn" >Tutup1</button>
       <button type=""  id="bugDetailEditBtn"></button> -->
-      <p data-close="bugDetailModalOverlay"></p>
-      <p id="bugDetailEditBtn"></p>
+          <p data-close="bugDetailModalOverlay"></p>
+          <p id="bugDetailEditBtn"></p>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
 
-<!-- ============ MODAL: User Form (Create/Edit) ============ -->
-<div class="modal-overlay" id="userFormModalOverlay">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="userFormTitle">Tambah User</h2>
-      <button class="close-x" data-close="userFormModalOverlay">✕</button>
+    <!-- ============ MODAL: User Form (Create/Edit) ============ -->
+    <div class="modal-overlay" id="userFormModalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h2 id="userFormTitle">Tambah User</h2>
+          <button class="close-x" data-close="userFormModalOverlay">✕</button>
+        </div>
+        <div class="field">
+          <label>Email</label
+          ><input
+            type="email"
+            id="settUserEmail"
+            placeholder="nama@contoh.com"
+          />
+        </div>
+        <div class="field">
+          <label>Password</label
+          ><input
+            type="password"
+            id="settUserPassword"
+            placeholder="Min 4 karakter"
+          />
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <select id="settUserRole">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close="userFormModalOverlay">
+            Batal
+          </button>
+          <button type="button" class="btn primary" id="settUserSaveBtn">
+            Simpan
+          </button>
+        </div>
+      </div>
     </div>
-    <div class="field"><label>Email</label><input type="email" id="settUserEmail" placeholder="nama@contoh.com"></div>
-    <div class="field"><label>Password</label><input type="password" id="settUserPassword" placeholder="Min 4 karakter"></div>
-    <div class="field"><label>Role</label>
-      <select id="settUserRole"><option value="user">User</option><option value="admin">Admin</option></select>
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn" data-close="userFormModalOverlay">Batal</button>
-      <button type="button" class="btn primary" id="settUserSaveBtn">Simpan</button>
-    </div>
-  </div>
-</div>
 
-<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="spinner"></div>
+      <span class="text-faint">Memuat aplikasi...</span>
+    </div>
 
-<!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
-<script src="js/auth.js?v=8"></script>
-<script src="js/dashboard.js?v=8"></script>
-<script src="js/testcase.js?v=8"></script>
-<script src="js/bugreport.js?v=8"></script>
-<script src="js/summary.js?v=8"></script>
-<script src="js/import.js?v=8"></script>
-<script src="js/export.js?v=8"></script>
-<script src="js/settings.js?v=8"></script>
-<script src="js/masterstatus.js?v=8"></script>
-<script src="js/usermanagement.js?v=8"></script>
-<script>
-  // Generic modal close (X button / Cancel buttons) + quick-add wiring.
-  document.querySelectorAll('[data-close]').forEach(btn => {
-    btn.addEventListener('click', () => document.getElementById(btn.dataset.close).classList.remove('active'));
-  });
-  document.querySelectorAll('.modal-overlay').forEach(ov => {
-    ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('active'); });
-  });
-  document.getElementById('tcAddBtn').addEventListener('click', () => TestCaseModule.openForm());
-  document.getElementById('tcEmptyAddBtn').addEventListener('click', () => TestCaseModule.openForm());
-  document.getElementById('tcExportExcelBtn').addEventListener('click', () => TestCaseModule.exportExcel());
-  document.getElementById('tcExportCsvBtn').addEventListener('click', () => TestCaseModule.exportCSV());
-  document.getElementById('bugAddBtn').addEventListener('click', () => BugReportModule.openForm());
-  document.getElementById('bugEmptyAddBtn').addEventListener('click', () => BugReportModule.openForm());
-  document.getElementById('bugExportExcelBtn').addEventListener('click', () => BugReportModule.exportExcel());
-  document.getElementById('bugExportCsvBtn').addEventListener('click', () => BugReportModule.exportCSV());
-  document.getElementById('globalFab').addEventListener('click', () => {
-    document.getElementById('fabWrap').classList.toggle('open');
-  });
-  document.getElementById('fabAddTc').addEventListener('click', () => {
-    document.getElementById('fabWrap').classList.remove('open');
-    TestCaseModule.openForm();
-  });
-  document.getElementById('fabAddBug').addEventListener('click', () => {
-    document.getElementById('fabWrap').classList.remove('open');
-    BugReportModule.openForm();
-  });
-  document.addEventListener('click', e => {
-    const wrap = document.getElementById('fabWrap');
-    if (wrap.classList.contains('open') && !wrap.contains(e.target)) wrap.classList.remove('open');
-  });
-  // loadingOverlay is hidden by auth.js once Storage.hydrate() (MySQL fetch) resolves.
-</script>
-</body>
+    <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
+    <script src="js/utils.js?v=8"></script>
+    <script src="js/app.js?v=8"></script>
+    <script src="js/auth.js?v=8"></script>
+    <script src="js/dashboard.js?v=8"></script>
+    <script src="js/testcase.js?v=8"></script>
+    <script src="js/bugreport.js?v=8"></script>
+    <script src="js/summary.js?v=8"></script>
+    <script src="js/import.js?v=8"></script>
+    <script src="js/export.js?v=8"></script>
+    <script src="js/settings.js?v=8"></script>
+    <script src="js/masterstatus.js?v=8"></script>
+    <script src="js/usermanagement.js?v=8"></script>
+    <script>
+      // Generic modal close (X button / Cancel buttons) + quick-add wiring.
+      document.querySelectorAll("[data-close]").forEach((btn) => {
+        btn.addEventListener("click", () =>
+          document.getElementById(btn.dataset.close).classList.remove("active"),
+        );
+      });
+      document.querySelectorAll(".modal-overlay").forEach((ov) => {
+        ov.addEventListener("click", (e) => {
+          if (e.target === ov) ov.classList.remove("active");
+        });
+      });
+      document
+        .getElementById("tcAddBtn")
+        .addEventListener("click", () => TestCaseModule.openForm());
+      document
+        .getElementById("tcEmptyAddBtn")
+        .addEventListener("click", () => TestCaseModule.openForm());
+      document
+        .getElementById("tcExportExcelBtn")
+        .addEventListener("click", () => TestCaseModule.exportExcel());
+      document
+        .getElementById("tcExportCsvBtn")
+        .addEventListener("click", () => TestCaseModule.exportCSV());
+      document
+        .getElementById("bugAddBtn")
+        .addEventListener("click", () => BugReportModule.openForm());
+      document
+        .getElementById("bugEmptyAddBtn")
+        .addEventListener("click", () => BugReportModule.openForm());
+      document
+        .getElementById("bugExportExcelBtn")
+        .addEventListener("click", () => BugReportModule.exportExcel());
+      document
+        .getElementById("bugExportCsvBtn")
+        .addEventListener("click", () => BugReportModule.exportCSV());
+      document.getElementById("globalFab").addEventListener("click", () => {
+        document.getElementById("fabWrap").classList.toggle("open");
+      });
+      document.getElementById("fabAddTc").addEventListener("click", () => {
+        document.getElementById("fabWrap").classList.remove("open");
+        TestCaseModule.openForm();
+      });
+      document.getElementById("fabAddBug").addEventListener("click", () => {
+        document.getElementById("fabWrap").classList.remove("open");
+        BugReportModule.openForm();
+      });
+      document.addEventListener("click", (e) => {
+        const wrap = document.getElementById("fabWrap");
+        if (wrap.classList.contains("open") && !wrap.contains(e.target))
+          wrap.classList.remove("open");
+      });
+      // loadingOverlay is hidden by auth.js once Storage.hydrate() (MySQL fetch) resolves.
+    </script>
+  </body>
 </html>
-< ! - -   C I / C D   t e s t   - - >  
- 
+<
