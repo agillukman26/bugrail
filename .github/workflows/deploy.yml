@@ -1,0 +1,29 @@
+name: Deploy BugRail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: itdev1
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/qa-monitor
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            cd /opt/qa-monitor/server
+            npm install --omit=dev
+
+            sudo systemctl restart bugrail
+            sudo systemctl is-active bugrail
