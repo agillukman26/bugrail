@@ -14,9 +14,12 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
           username: itdev1
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            set -e
+
             cd /opt/qa-monitor
 
             git fetch origin main
