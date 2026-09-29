@@ -376,7 +376,7 @@
         <div class="section-label">Import</div>
         <div class="card" style="margin-bottom:16px;">
           <div class="card-head"><h3>Import Test Case</h3><span class="hint">Format: .xlsx atau .csv</span></div>
-          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Test Case ID boleh dikosongkan — sistem akan generate otomatis (prefix 3 huruf dari Module).</p>
+          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Semua sheet dibaca (seperti hasil Export per module); Module kosong = nama sheet. Kolom Test Case ID diabaikan — nomor dibuat otomatis dan berurutan per workspace (prefix 3 huruf dari Module).</p>
           <div class="dropzone" id="importDropzone">
             <div style="font-size:28px;">⇩</div>
             <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
@@ -680,7 +680,7 @@
       <h2>Import Test Case</h2>
       <button class="close-x" data-close="tcImportModalOverlay">✕</button>
     </div>
-    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Test Case ID boleh dikosongkan.</p>
+    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Semua sheet dibaca; Test Case ID diabaikan, nomor dibuat otomatis per workspace.</p>
     <div class="dropzone" id="tcImportDropzone">
       <div style="font-size:28px;">⇩</div>
       <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
@@ -709,7 +709,7 @@
       <h2>Import Bug Report</h2>
       <button class="close-x" data-close="bugImportModalOverlay">✕</button>
     </div>
-    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Module, Bug Title, Description, Expected Result, Actual Result, Severity, Priority, Status, Tester, Environment, Browser, OS, Device, Build Version</b>. Bug Title dan Actual Result wajib diisi.</p>
+    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Module, Bug Title, Description, Expected Result, Actual Result, Severity, Priority, Status, Tester, Environment, Browser, OS, Device, Build Version</b>. Bug Title dan Actual Result wajib diisi. Semua sheet dibaca; Module kosong = nama sheet.</p>
     <div class="dropzone" id="bugImportDropzone">
       <div style="font-size:28px;">⇩</div>
       <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
@@ -997,19 +997,19 @@
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
 
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=32"></script>
-<script src="js/app.js?v=31"></script>
+<script src="js/utils.js?v=36"></script>
+<script src="js/app.js?v=34"></script>
 <script src="js/activitylog.js?v=7"></script>
 <script src="js/workspace.js?v=5"></script>
 <script src="js/auth.js?v=23"></script>
 <script src="js/dashboard.js?v=17"></script>
-<script src="js/testcase.js?v=40"></script>
-<script src="js/testforge.js?v=2"></script>
-<script src="js/bugreport.js?v=39"></script>
+<script src="js/testcase.js?v=45"></script>
+<script src="js/testforge.js?v=3"></script>
+<script src="js/bugreport.js?v=47"></script>
 <script src="js/summary.js?v=18"></script>
 <script src="js/report.js?v=6"></script>
 <script src="js/notifications.js?v=3"></script>
-<script src="js/import.js?v=16"></script>
+<script src="js/import.js?v=17"></script>
 <script src="js/export.js?v=16"></script>
 <script src="js/settings.js?v=16"></script>
 <script src="js/masterstatus.js?v=16"></script>

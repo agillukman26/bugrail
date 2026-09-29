@@ -228,9 +228,9 @@ const TestForgeModule = {
     const fileId = TestCaseModule.ui.activeFileId;
     this.ui.staged.forEach(tc => {
       const module = tc.module || '';
-      const newId = IdGen.next(moduleAbbrev(module));
       App.state.testcases.push({
-        id: newId,
+        id: IdGen.uid('TC'),
+        code: TestCaseModule.nextCode(module, fileId),
         module,
         roleUser: tc.roleUser || '',
         scenario: tc.scenario || '',

@@ -37,6 +37,13 @@ const TestCaseModule = {
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
 
+  // Display number: module prefix + counter per workspace of the file (LOG-0001 in each workspace).
+  nextCode(module, fileId){
+    const ws = fileWorkspace(fileId);
+    const codes = App.state.testcases.filter(t => fileWorkspace(t.fileId) === ws).map(tcCode);
+    return IdGen.nextInScope(moduleAbbrev(module), codes);
+  },
+
   /* ---- files (grouping) ---- */
   files(){ return Auth.visibleFiles(App.state.files); },
   fileCounts(){
@@ -112,7 +119,7 @@ const TestCaseModule = {
     let rows = this.all().filter(tc => {
       if (activeFileId && tc.fileId !== activeFileId) return false;
       if (search){
-        const hay = `${tc.id} ${tc.module} ${tc.roleUser||''} ${tc.scenario} ${tc.testCase||''} ${tc.preconditions||''} ${stripHtml(tc.steps||'')} ${tc.testData||''} ${tc.expectedResult||''} ${tc.actualResult||''} ${tc.evidence||''}`.toLowerCase();
+        const hay = `${tcCode(tc)} ${tc.module} ${tc.roleUser||''} ${tc.scenario} ${tc.testCase||''} ${tc.preconditions||''} ${stripHtml(tc.steps||'')} ${tc.testData||''} ${tc.expectedResult||''} ${tc.actualResult||''} ${tc.evidence||''}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -121,13 +128,7 @@ const TestCaseModule = {
       if (filters.status && tc.status !== filters.status) return false;
       return true;
     });
-    rows.sort((a,b) => {
-      const av = (a[sortKey] ?? '').toString().toLowerCase();
-      const bv = (b[sortKey] ?? '').toString().toLowerCase();
-      if (av < bv) return sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
+    rows.sort((a, b) => compareRows(a, b, sortKey, sortDir, tcCode));
     return rows;
   },
 
@@ -187,7 +188,7 @@ const TestCaseModule = {
     body.innerHTML = pageRows.map(tc => `
       <tr>
         <td><input type="checkbox" class="checkbox tc-row-check" data-id="${tc.id}" ${this.ui.selected.has(tc.id) ? 'checked':''}></td>
-        <td class="mono tc-id-link" data-view="${tc.id}" style="cursor:pointer; text-decoration:underline;" title="${escapeHtml(tc.steps ? `Test Step:\n${stripHtml(tc.steps)}` : 'Belum ada Test Step')}">${escapeHtml(tc.id)}</td>
+        <td class="mono tc-id-link" data-view="${tc.id}" style="cursor:pointer; text-decoration:underline;" title="${escapeHtml(tc.steps ? `Test Step:\n${stripHtml(tc.steps)}` : 'Belum ada Test Step')}">${escapeHtml(tcCode(tc))}</td>
         <td class="truncate" title="${escapeHtml(tc.module)}">${escapeHtml(tc.module)}</td>
         <td class="truncate" title="${escapeHtml(tc.roleUser)}">${escapeHtml(tc.roleUser || '-')}</td>
         <td class="truncate" title="${escapeHtml(tc.scenario)}">${escapeHtml(tc.scenario)}</td>
@@ -355,8 +356,8 @@ const TestCaseModule = {
     const f = document.getElementById('tcForm');
     f.reset();
     this.showModuleError('');
-    document.getElementById('tcModalTitle').textContent = tc ? `Edit Test Case — ${tc.id}` : 'Tambah Test Case';
-    document.getElementById('tcFieldId').value = tc ? tc.id : '(auto generate, prefix dari Module)';
+    document.getElementById('tcModalTitle').textContent = tc ? `Edit Test Case — ${tcCode(tc)}` : 'Tambah Test Case';
+    document.getElementById('tcFieldId').value = tc ? tcCode(tc) : '(auto generate, prefix dari Module, nomor per workspace)';
     if (tc){
       this.setModule(tc.module); f.roleUser.value = tc.roleUser || ''; f.scenario.value = tc.scenario;
       f.testCase.value = tc.testCase || '';
@@ -516,14 +517,13 @@ const TestCaseModule = {
     if (this.ui.editingId){
       const idx = App.state.testcases.findIndex(t => t.id === this.ui.editingId);
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
-      ActivityLog.record('testcase_update', `Test Case ${this.ui.editingId} diperbarui`);
-      Toast.show(`Test case ${this.ui.editingId} diperbarui.`, 'success');
+      ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`);
+      Toast.show(`Test case ${tcCode(App.state.testcases[idx])} diperbarui.`, 'success');
     } else {
-      const id = IdGen.next(moduleAbbrev(data.module));
-      const tc = { id, ...data, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
+      const tc = { id: IdGen.uid('TC'), code: this.nextCode(data.module, this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
       App.state.testcases.push(tc);
-      ActivityLog.record('testcase_create', `Test Case ${id} dibuat`);
-      Toast.show(`Test case ${id} dibuat.`, 'success');
+      ActivityLog.record('testcase_create', `Test Case ${tc.code} dibuat`);
+      Toast.show(`Test case ${tc.code} dibuat.`, 'success');
     }
     App.saveTestcases();
     this.closeForm();
@@ -534,7 +534,7 @@ const TestCaseModule = {
   openDetail(id){
     const tc = this.all().find(t => t.id === id);
     if (!tc) return;
-    document.getElementById('tcDetailTitle').textContent = `Detail Test Case — ${tc.id}`;
+    document.getElementById('tcDetailTitle').textContent = `Detail Test Case — ${tcCode(tc)}`;
     const block = (label, value) => `
       <div class="bug-detail-block">
         <div class="bug-detail-block-label">${label}</div>
@@ -573,7 +573,7 @@ const TestCaseModule = {
   openExecute(id){
     this.ui.executingId = id;
     const tc = this.all().find(t => t.id === id);
-    document.getElementById('runModalTitle').textContent = `Execute — ${tc.id}`;
+    document.getElementById('runModalTitle').textContent = `Execute — ${tcCode(tc)}`;
     document.getElementById('runScenario').textContent = tc.scenario;
     document.getElementById('runExpected').textContent = tc.expectedResult || '-';
     const f = document.getElementById('runForm');
@@ -588,7 +588,7 @@ const TestCaseModule = {
     const f = e.target;
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
     const from = App.state.testcases[idx].status;
-    const id = App.state.testcases[idx].id;
+    const id = tcCode(App.state.testcases[idx]);
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
@@ -603,8 +603,8 @@ const TestCaseModule = {
   duplicate(id){
     if (!Auth.can('testcase_create')) return;
     const tc = this.all().find(t => t.id === id);
-    const newId = IdGen.next(moduleAbbrev(tc.module));
-    App.state.testcases.push({ ...tc, id: newId, fileId: tc.fileId, status:'Open', actualResult:'', evidence:'', executionDate:'', createdBy: Auth.currentEmail() || '', createdAt: nowISO() });
+    const newId = this.nextCode(tc.module, tc.fileId);
+    App.state.testcases.push({ ...tc, id: IdGen.uid('TC'), code: newId, fileId: tc.fileId, status:'Open', actualResult:'', evidence:'', executionDate:'', createdBy: Auth.currentEmail() || '', createdAt: nowISO() });
     App.saveTestcases();
     this.render();
     Toast.show(`Duplikat dibuat sebagai ${newId}.`, 'success');
@@ -612,15 +612,16 @@ const TestCaseModule = {
 
   async remove(id){
     if (!Auth.can('testcase_delete')) return;
-    const ok = await confirmDialog('Hapus Test Case?', `${id} akan dihapus. Tindakan ini dapat di-undo sebentar.`);
+    const code = tcCode(App.state.testcases.find(t => t.id === id));
+    const ok = await confirmDialog('Hapus Test Case?', `${code} akan dihapus. Tindakan ini dapat di-undo sebentar.`);
     if (!ok) return;
     const idx = App.state.testcases.findIndex(t => t.id === id);
     const removed = App.state.testcases.splice(idx, 1)[0];
-    ActivityLog.record('testcase_delete', `Test Case ${id} dihapus`);
+    ActivityLog.record('testcase_delete', `Test Case ${code} dihapus`);
     App.saveTestcases();
     this.ui.selected.delete(id);
     this.render();
-    Toast.show(`${id} dihapus.`, 'info', { undo: () => {
+    Toast.show(`${code} dihapus.`, 'info', { undo: () => {
       App.state.testcases.splice(idx, 0, removed); App.saveTestcases(); this.render();
     }});
   },
@@ -664,32 +665,41 @@ const TestCaseModule = {
     reader.onload = (e) => {
       try{
         const wb = XLSX.read(e.target.result, { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        let count = 0;
-        rows.forEach(r => {
-          const module = r.Module || r.module;
-          const scenario = r.Scenario || r.scenario;
-          if (!module || !scenario) return;
-          const id = (r['Test Case ID'] || r.id) && !this.all().some(t=>t.id === (r['Test Case ID']||r.id))
-            ? (r['Test Case ID'] || r.id) : IdGen.next(moduleAbbrev(module));
-          App.state.testcases.push({
-            id, module, roleUser: r['Role User'] || r.roleUser || '',
-            scenario, testCase: r['Test Case'] || r.testCase || '',
-            preconditions: r['Pre Kondisi'] || r.Preconditions || r.preconditions || '',
-            steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
-            expectedResult: r['Expected Result'] || r.expectedResult || '',
-            actualResult: '', evidence: r['Evidence'] || r.evidence || '', status: 'Open',
-            typeTest: r['Type Test'] || r.typeTest || 'Positive',
-            executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
+        // Read every sheet — Export Excel writes one sheet per module. A row with an
+        // empty Module takes the sheet's name (unless it's a generic "Sheet1"/"Template").
+        let count = 0, sheetsUsed = 0;
+        wb.SheetNames.forEach(sheetName => {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+          const sheetModule = /^(sheet\s*\d*|template)$/i.test(sheetName.trim()) ? '' : sheetName.trim();
+          const before = count;
+          rows.forEach(raw => {
+            const r = {};
+            Object.keys(raw).forEach(k => { r[k.replace(/\s*\*\s*$/, '').trim()] = raw[k]; }); // "Module *" -> "Module"
+            const module = String(r.Module || r.module || sheetModule).trim();
+            const scenario = r.Scenario || r.scenario;
+            if (!module || !scenario) return;
+            // Always number imported rows fresh, in file order, per workspace — a
+            // "Test Case ID" in the file (often from another workspace/export) is ignored.
+            const code = this.nextCode(module, this.ui.activeFileId);
+            App.state.testcases.push({
+              id: IdGen.uid('TC'), code, module, roleUser: r['Role User'] || r.roleUser || '',
+              scenario, testCase: r['Test Case'] || r.testCase || '',
+              preconditions: r['Pre Kondisi'] || r.Preconditions || r.preconditions || '',
+              steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
+              expectedResult: r['Expected Result'] || r.expectedResult || '',
+              actualResult: '', evidence: r['Evidence'] || r.evidence || '', status: 'Open',
+              typeTest: r['Type Test'] || r.typeTest || 'Positive',
+              executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
+            });
+            count++;
           });
-          count++;
+          if (count > before) sheetsUsed++;
         });
         App.ensureDefaultFile();
         App.saveTestcases();
-        ActivityLog.record('testcase_create', `${count} test case di-import dari file`);
+        ActivityLog.record('testcase_create', `${count} test case di-import dari ${sheetsUsed} sheet`);
         this.render();
-        Toast.show(`${count} test case berhasil di-import.`, 'success');
+        Toast.show(`${count} test case dari ${sheetsUsed} sheet berhasil di-import.`, count ? 'success' : 'info');
       }catch(err){
         console.error(err);
         Toast.show('Gagal membaca file. Pastikan format sesuai template.', 'error');
@@ -701,7 +711,7 @@ const TestCaseModule = {
   /* ---- Export ---- */
   exportColumns(){
     const cols = [
-      { key:'id', label:'Test Case ID', width:14 },
+      { key:'code', label:'Test Case ID', width:14 },
       { key:'module', label:'Module', width:16 },
       { key:'roleUser', label:'Role User', width:14 },
       { key:'scenario', label:'Scenario', width:30 },
@@ -773,7 +783,7 @@ const TestCaseModule = {
   /* One sheet per Module (respects current search/filter via this.filtered()). */
   async exportExcel(){
     const cols = [{ key:'no', label:'No', width:6 }, ...this.exportColumns()];
-    const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
+    const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), code: tcCode(t) }));
 
     const byModule = new Map();
     rows.forEach(r => {
@@ -796,7 +806,7 @@ const TestCaseModule = {
   },
   exportCSV(){
     const cols = [{ key:'no', label:'No' }, ...this.exportColumns()];
-    const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1 }));
+    const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1, code: tcCode(t) }));
     downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     Toast.show('Export CSV Test Case berhasil (siap import ke Google Spreadsheet).', 'success');

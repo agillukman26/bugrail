@@ -7,7 +7,9 @@ const ImportPage = {
   /* Styled .xlsx template, same look as TestCaseModule.exportExcel:
      header fill, borders + wrap text, dropdown on Type Test / Status. */
   async downloadTemplate(){
-    const cols = TestCaseModule.exportColumns().filter(c => c.key !== 'id');
+    const REQUIRED = ['module', 'scenario']; // what importFile() needs; shown as "Module *"
+    const cols = TestCaseModule.exportColumns().filter(c => c.key !== 'code')
+      .map(c => REQUIRED.includes(c.key) ? { ...c, label: `${c.label} *` } : c);
     const sample = {
       module:'Login', roleUser:'Customer', scenario:'Login dengan kredensial valid',
       testCase:'Verifikasi login sukses dengan email & password valid',

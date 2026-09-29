@@ -28,7 +28,6 @@ const App = {
     this.ensureRolePermissions();
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
-    IdGen.syncAllFromExisting(this.state.testcases.map(t => t.id));
   },
   /* Merge default permissions into settings so newly-added permission keys
      show up on the matrix, without clobbering an admin's saved overrides. */
@@ -86,7 +85,14 @@ const App = {
   },
 
   /* ---- Routing (simple show/hide, no history API needed offline) ---- */
-  goTo(page){
+  /* Every page switch is a browser-history entry, so Back/Forward move between
+     BugRail pages instead of leaving the app (and losing an unsaved form). */
+  goTo(page, { fromHistory = false, replace = false } = {}){
+    if (!fromHistory){
+      const url = location.href.split('#')[0];
+      if (replace || !history.state) history.replaceState({ page }, '', url);
+      else if (history.state.page !== page) history.pushState({ page }, '', url);
+    }
     this.state.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
@@ -176,14 +182,14 @@ const App = {
     const LIMIT = 6;
     const hit = (...fields) => fields.some(f => String(f || '').toLowerCase().includes(q));
     const tcs = Auth.can('testcase_read')
-      ? TestCaseModule.all().filter(t => hit(t.id, t.scenario, t.testCase, t.module)) : [];
+      ? TestCaseModule.all().filter(t => hit(tcCode(t), t.scenario, t.testCase, t.module)) : [];
     const bugs = Auth.can('bugreport_read')
       ? BugReportModule.all().filter(b => hit(bugCode(b), b.title, b.module, b.description)) : [];
     const group = (title, list, type, label) => list.length ? `
       <div class="gs-group">${title} <span>${list.length > LIMIT ? `${LIMIT} dari ${list.length}` : list.length}</span></div>
       ${list.slice(0, LIMIT).map(x => `
         <div class="gs-item" role="option" data-type="${type}" data-id="${escapeHtml(x.id)}">
-          <span class="mono">${escapeHtml(type === 'bug' ? bugCode(x) : x.id)}</span>
+          <span class="mono">${escapeHtml(type === 'bug' ? bugCode(x) : tcCode(x))}</span>
           <span class="gs-title">${escapeHtml(label(x))}</span>
           <span class="gs-meta">${escapeHtml(x.module || '')} · ${escapeHtml(x.status || '')}</span>
         </div>`).join('')}` : '';
@@ -340,8 +346,14 @@ const App = {
       }
     });
 
-    this.goTo(this.firstAllowedPage());
+    this.goTo(this.firstAllowedPage(), { replace: true });
     window.addEventListener('hashchange', () => this.openDeepLink());
+    window.addEventListener('popstate', e => {
+      const page = e.state && e.state.page;
+      if (!page || !this.canAccessPage(page)) return;
+      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+      this.goTo(page, { fromHistory: true });
+    });
   },
 
   /* Pages gated purely by Auth.can(); rolepermission/workspace (admin-only)
@@ -389,7 +401,7 @@ const App = {
   openDeepLink(){
     const id = this.deepLinkBugId();
     if (!id) return false;
-    history.replaceState(null, '', location.href.split('#')[0]); // consume: reload won't reopen it
+    history.replaceState(history.state, '', location.href.split('#')[0]); // consume: reload won't reopen it
     const bug = this.state.bugs.find(b => b.id === id);
     if (!bug){ Toast.show('Bug dari link tidak ditemukan atau sudah dihapus.', 'error'); return true; }
     const file = this.state.files.find(f => f.id === bug.fileId);

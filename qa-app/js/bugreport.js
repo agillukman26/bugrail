@@ -32,11 +32,23 @@ const BugReportModule = {
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
+  // Linked test case: bugs store its internal id; show / import by its number.
+  tcLabel(tcId){ return tcId ? tcCode(App.state.testcases.find(t => t.id === tcId) || { id: tcId }) : ''; },
+  tcIdFromCode(code){
+    code = String(code || '').trim();
+    if (!code) return null;
+    const ws = fileWorkspace(this.ui.activeFileId);
+    const tc = App.state.testcases.find(t => (tcCode(t) === code || t.id === code) && fileWorkspace(t.fileId) === ws)
+      || App.state.testcases.find(t => tcCode(t) === code || t.id === code);
+    return tc ? tc.id : null;
+  },
+
   // Display number, counted per workspace of the file the bug lives in.
   nextCode(fileId){
-    const file = App.state.files.find(f => f.id === fileId);
-    return IdGen.nextFor('BUG', file && file.workspaceId);
+    const ws = fileWorkspace(fileId);
+    return IdGen.nextInScope('BUG', App.state.bugs.filter(b => fileWorkspace(b.fileId) === ws).map(bugCode));
   },
+
   all(){
     if (Auth.seesAllWorkspaces()) return App.state.bugs;
     const visibleIds = new Set(this.files().map(f => f.id));
@@ -106,7 +118,7 @@ const BugReportModule = {
     let rows = this.all().filter(b => {
       if (activeFileId && b.fileId !== activeFileId) return false;
       if (search){
-        const hay = `${bugCode(b)} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
+        const hay = `${bugCode(b)} ${b.module} ${b.title} ${b.tester} ${this.tcLabel(b.testCaseId)} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -117,13 +129,7 @@ const BugReportModule = {
       if (filters.tester && b.tester !== filters.tester) return false;
       return true;
     });
-    rows.sort((a,b) => {
-      const av = (a[sortKey] ?? '').toString().toLowerCase();
-      const bv = (b[sortKey] ?? '').toString().toLowerCase();
-      if (av < bv) return sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
+    rows.sort((a, b) => compareRows(a, b, sortKey, sortDir, bugCode));
     return rows;
   },
 
@@ -191,7 +197,7 @@ const BugReportModule = {
       <tr class="row-clickable" data-id="${b.id}">
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
         <td class="mono">${escapeHtml(bugCode(b))}</td>
-        <td class="mono text-dim">${escapeHtml(b.testCaseId || '-')}</td>
+        <td class="mono text-dim">${escapeHtml(this.tcLabel(b.testCaseId) || '-')}</td>
         <td class="truncate" title="${escapeHtml(b.title)}">${escapeHtml(b.title)}</td>
         <td class="truncate" title="${escapeHtml(b.module)}">${escapeHtml(b.module)}</td>
         <td>${this.severityBadge(b.severity)}</td>
@@ -445,6 +451,9 @@ const BugReportModule = {
   renderChat(bug){
     const list = document.getElementById('bugChatList');
     const tab = this.ui.chatTab;
+    // Writing is only for the Comments tab; All / Activity are read-only timelines.
+    const composer = document.querySelector('#bugDetailModalOverlay .bug-chat-composer');
+    if (composer) composer.style.display = tab === 'comment' ? '' : 'none';
     let feed = [
       ...(bug.activity || []).map(a => ({ type:'activity', at:a.at, from:a.from, to:a.to, note:a.note, attachment:a.attachment, email:a.email })),
       ...(bug.comments || []).map(c => ({ type:'comment', at:c.at, email:c.email, text:c.text }))
@@ -641,7 +650,7 @@ const BugReportModule = {
     document.getElementById('bugTestCaseSelect').value = tcId || '';
     const label = document.getElementById('bugTestCaseTriggerText');
     const tc = tcId ? App.state.testcases.find(t => t.id === tcId) : null;
-    label.textContent = tc ? `${tc.id} — ${tc.scenario.slice(0,60)}` : '— Tidak terkait Test Case —';
+    label.textContent = tc ? `${tcCode(tc)} — ${tc.scenario.slice(0,60)}` : '— Tidak terkait Test Case —';
     label.classList.toggle('text-faint', !tc);
     this.fillFromTestCase(tcId, silent);
   },
@@ -649,12 +658,12 @@ const BugReportModule = {
     const listEl = document.getElementById('bugTestCaseList');
     const q = query.trim().toLowerCase();
     const all = App.state.testcases;
-    const filtered = q ? all.filter(t => t.id.toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
+    const filtered = q ? all.filter(t => tcCode(t).toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
     const noneItem = `<div class="dropdown-item combobox-option" data-tc="">— Tidak terkait Test Case —</div>`;
     if (!filtered.length){
       listEl.innerHTML = noneItem + `<div class="combobox-empty"><p>Test case tidak ditemukan.</p></div>`;
     } else {
-      listEl.innerHTML = noneItem + filtered.map(t => `<div class="dropdown-item combobox-option" data-tc="${escapeHtml(t.id)}">${escapeHtml(t.id)} — ${escapeHtml(t.scenario||'').slice(0,60)}</div>`).join('');
+      listEl.innerHTML = noneItem + filtered.map(t => `<div class="dropdown-item combobox-option" data-tc="${escapeHtml(t.id)}">${escapeHtml(tcCode(t))} —${escapeHtml(t.scenario||'').slice(0,60)}</div>`).join('');
     }
     listEl.querySelectorAll('[data-tc]').forEach(el => {
       el.addEventListener('click', () => {
@@ -784,7 +793,7 @@ const BugReportModule = {
   /* ---- Export ---- */
   exportExcel(){
     const rows = this.filtered().map(b => ({
-      'Bug ID': bugCode(b), 'Test Case ID': b.testCaseId || '', Module: b.module,
+      'Bug ID': bugCode(b), 'Test Case ID': this.tcLabel(b.testCaseId), Module: b.module,
       Scenario: b.scenario, 'Bug Title': b.title, Description: b.description,
       'Expected Result': b.expectedResult, 'Actual Result': b.actualResult,
       Severity: b.severity, Priority: b.priority, Status: b.status, Tester: b.tester,
@@ -809,7 +818,7 @@ const BugReportModule = {
       {key:'environment',label:'Environment'},{key:'browser',label:'Browser'},{key:'os',label:'OS'},
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
-    downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b) })), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
+    downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b), testCaseId: this.tcLabel(b.testCaseId) })), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
     ActivityLog.record('bugreport_export', `${this.filtered().length} bug di-export ke CSV`);
     Toast.show('Export CSV Bug Report berhasil (siap import ke Google Spreadsheet).', 'success');
   },
@@ -821,32 +830,50 @@ const BugReportModule = {
     reader.onload = (e) => {
       try{
         const wb = XLSX.read(e.target.result, { type: 'array' });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        let count = 0;
-        rows.forEach(r => {
-          const title = r['Bug Title'] || r.title;
-          const actualResult = r['Actual Result'] || r.actualResult;
-          if (!title || !actualResult) return;
-          App.state.bugs.push({
-            id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), testCaseId: r['Test Case ID'] || r.testCaseId || null,
-            module: r.Module || r.module || '', scenario: r.Scenario || r.scenario || '',
-            expectedResult: r['Expected Result'] || r.expectedResult || '', steps: '',
-            tester: r.Tester || r.tester || '', title, description: r.Description || r.description || '',
-            actualResult, severity: r.Severity || r.severity || 'Medium',
-            priority: r.Priority || r.priority || 'Medium', status: r.Status || r.status || 'Open',
-            environment: r.Environment || r.environment || '', browser: r.Browser || r.browser || '',
-            os: r.OS || r.os || '', device: r.Device || r.device || '',
-            buildVersion: r['Build Version'] || r.buildVersion || '', attachments: r.Attachment || r.attachments || '',
-            fileId: this.ui.activeFileId, reportDate: nowISO()
+        // Read every sheet (same as Test Case import). A row with an empty Module
+        // takes the sheet's name, unless it's a generic "Sheet1"/"Template".
+        let count = 0, sheetsUsed = 0;
+        wb.SheetNames.forEach(sheetName => {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+          const sheetModule = /^(sheet\s*\d*|template)$/i.test(sheetName.trim()) ? '' : sheetName.trim();
+          const before = count;
+          rows.forEach(raw => {
+            // Template headers mark required columns with "*": "Bug Title *" -> "Bug Title".
+            const r = {};
+            Object.keys(raw).forEach(k => { r[k.replace(/\s*\*\s*$/, '').trim()] = typeof raw[k] === 'string' ? raw[k].trim() : raw[k]; });
+            const title = r['Bug Title'] || r.title;
+            const actualResult = r['Actual Result'] || r.actualResult;
+            if (!title || !actualResult) return;
+            const testCaseId = this.tcIdFromCode(r['Test Case ID'] || r.testCaseId);
+            const tc = testCaseId ? App.state.testcases.find(t => t.id === testCaseId) : null; // same auto-fill as the form
+            const statuses = this.STATUS;
+            const status = statuses.includes(r.Status || r.status) ? (r.Status || r.status) : (statuses[0] || 'Open');
+            const bug = {
+              id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), testCaseId,
+              module: String(r.Module || r.module || (tc && tc.module) || sheetModule).trim(),
+              scenario: r.Scenario || r.scenario || (tc && tc.scenario) || '',
+              expectedResult: r['Expected Result'] || r.expectedResult || (tc && tc.expectedResult) || '',
+              steps: (r['Test Steps'] || r.steps) ? textToStepsHtml(r['Test Steps'] || r.steps) : ((tc && tc.steps) || ''),
+              tester: r.Tester || r.tester || Auth.currentEmail() || '', title, description: r.Description || r.description || '',
+              actualResult, severity: r.Severity || r.severity || 'Medium',
+              priority: r.Priority || r.priority || 'Medium', status,
+              assignee: r['Assign ke'] || r.assignee || '',
+              environment: r.Environment || r.environment || '', browser: r.Browser || r.browser || '',
+              os: r.OS || r.os || '', device: r.Device || r.device || '',
+              buildVersion: r['Build Version'] || r.buildVersion || '', attachments: r.Attachment || r.attachments || '',
+              fileId: this.ui.activeFileId, reportDate: nowISO()
+            };
+            Auth.logAssignment(bug, '', bug.assignee); // assignee gets the bell notification
+            App.state.bugs.push(bug);
+            count++;
           });
-          count++;
+          if (count > before) sheetsUsed++;
         });
         App.ensureDefaultFile();
         App.saveBugs();
-        ActivityLog.record('bugreport_create', `${count} bug report di-import dari file`);
+        ActivityLog.record('bugreport_create', `${count} bug report di-import dari ${sheetsUsed} sheet`);
         this.render();
-        Toast.show(`${count} bug report berhasil di-import.`, 'success');
+        Toast.show(`${count} bug report dari ${sheetsUsed} sheet berhasil di-import.`, count ? 'success' : 'info');
       }catch(err){
         console.error(err);
         Toast.show('Gagal membaca file. Pastikan format sesuai template.', 'error');
@@ -855,25 +882,37 @@ const BugReportModule = {
     reader.readAsArrayBuffer(file);
   },
 
+  /* Import template: same fields and order as the Bug Report form. Required
+     columns end with " *" (importFile() strips it). Dropdown choices are read
+     from the form so they stay in sync. */
+  IMPORT_COLUMNS: [
+    { label:'Module', key:'module', width:16 },
+    { label:'Scenario', key:'scenario', width:28 }, { label:'Test Steps', key:'steps', width:30 },
+    { label:'Expected Result', key:'expectedResult', width:26 }, { label:'Tester', key:'tester', width:24 },
+    { label:'Actual Result *', key:'actualResult', width:28 }, { label:'Bug Title *', key:'title', width:30 },
+    { label:'Description', key:'description', width:28 },
+    { label:'Severity', key:'severity', width:12, listFrom:'severity' }, { label:'Priority', key:'priority', width:12, listFrom:'priority' },
+    { label:'Status', key:'status', width:14, listFrom:'status' }, { label:'Assign ke', key:'assignee', width:26, listFrom:'assignee' },
+    { label:'Environment', key:'environment', width:14, listFrom:'environment' },
+    { label:'Browser', key:'browser', width:14 }, { label:'OS', key:'os', width:14 },
+    { label:'Device', key:'device', width:16 }, { label:'Build Version', key:'buildVersion', width:14 },
+    { label:'Attachment', key:'attachments', width:30 }
+  ],
+
   async downloadImportTemplate(){
-    const cols = [
-      { key:'module', label:'Module', width:16 }, { key:'title', label:'Bug Title', width:30 },
-      { key:'description', label:'Description', width:26 }, { key:'expectedResult', label:'Expected Result', width:26 },
-      { key:'actualResult', label:'Actual Result', width:26 },
-      { key:'severity', label:'Severity', width:12, list:this.SEVERITY },
-      { key:'priority', label:'Priority', width:12, list:this.PRIORITY },
-      { key:'status', label:'Status', width:14, list:this.statusMaster().map(s=>s.name) },
-      { key:'tester', label:'Tester', width:16 },
-      { key:'environment', label:'Environment', width:16, list:['Local','Staging','Production'] },
-      { key:'browser', label:'Browser', width:14 }, { key:'os', label:'OS', width:14 },
-      { key:'device', label:'Device', width:16 }, { key:'buildVersion', label:'Build Version', width:14 }
-    ];
+    const formOptions = name => [...document.querySelectorAll(`#bugForm [name="${name}"] option`)].map(o => o.value).filter(Boolean);
+    const lists = {
+      severity: formOptions('severity'), priority: formOptions('priority'), environment: formOptions('environment'),
+      status: this.STATUS, assignee: (App.state.settings.users || []).map(u => u.email).filter(Boolean)
+    };
+    const cols = this.IMPORT_COLUMNS;
     const sample = {
-      module:'Login', title:'Login gagal dengan password valid',
-      description:'User tidak bisa login walau kredensial benar', expectedResult:'User masuk ke Dashboard',
-      actualResult:'Muncul error "Invalid credentials"', severity:'High', priority:'High',
-      status:'Open', tester:'Jane', environment:'Staging', browser:'Chrome 126', os:'Android 14',
-      device:'Samsung A54', buildVersion:'v1.2.3'
+      module:'Login', scenario:'Login dengan kredensial valid', steps:'1. Buka halaman login\n2. Isi email & password\n3. Klik Login',
+      expectedResult:'User masuk ke Dashboard', tester:'',
+      actualResult:'Muncul error "Invalid credentials"', title:'Login gagal dengan password valid',
+      description:'User tidak bisa login walau kredensial benar', severity: lists.severity[1] || 'High', priority: lists.priority[1] || 'High',
+      status: lists.status[0] || 'Open', assignee:'', environment: lists.environment[1] || '', browser:'Chrome 126', os:'Android 14',
+      device:'Samsung A54', buildVersion:'v1.2.3', attachments:''
     };
 
     const wb = new ExcelJS.Workbook();
@@ -897,12 +936,13 @@ const BugReportModule = {
       });
     });
 
+    // Inline dropdowns (Excel caps an inline list at 255 chars — skip one that's longer, e.g. many users).
     cols.forEach((c, i) => {
-      if (!c.list) return;
-      const colLetter = ws.getColumn(i + 1).letter;
-      ws.getCell(`${colLetter}2`).dataValidation = {
-        type: 'list', allowBlank: true, formulae: [`"${c.list.join(',')}"`]
-      };
+      const values = c.listFrom && lists[c.listFrom];
+      const formula = values && values.length ? `"${values.join(',')}"` : '';
+      if (!formula || formula.length > 257) return;
+      const letter = ws.getColumn(i + 1).letter;
+      for (let r = 2; r <= 500; r++) ws.getCell(`${letter}${r}`).dataValidation = { type: 'list', allowBlank: true, formulae: [formula] };
     });
 
     ws.views = [{ state: 'frozen', ySplit: 1 }];

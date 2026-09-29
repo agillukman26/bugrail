@@ -37,6 +37,22 @@ const API_BASE = location.protocol === 'file:' ? 'http://localhost:3001/api' : '
 const Storage = {
   cache: {},
   serverOnline: true,
+  inflight: 0,  // PUTs not answered yet
+  seq: {},      // per-key write counter, so an older reply can't clear a newer pending write
+  /* Keys whose latest local change hasn't been confirmed by the server (server
+     down, network cut, tab closed mid-request). Kept in localStorage so it
+     survives a reload; hydrate() re-sends them instead of letting the older
+     server copy overwrite them. */
+  UNSYNCED_KEY: 'qa_unsynced',
+  unsynced(){
+    try{ return JSON.parse(localStorage.getItem(this.UNSYNCED_KEY)) || []; }catch(e){ return []; }
+  },
+  markUnsynced(key, on){
+    const keys = new Set(this.unsynced());
+    if (on) keys.add(key); else keys.delete(key);
+    try{ localStorage.setItem(this.UNSYNCED_KEY, JSON.stringify([...keys])); }catch(e){}
+  },
+  hasUnsynced(){ return this.inflight > 0 || this.unsynced().length > 0; },
 
   async hydrate(){
     try{
@@ -55,7 +71,18 @@ const Storage = {
         }catch(err){ console.error('Storage.hydrate: bad localStorage value', key, err); }
       });
       Toast.show('Server database tidak terhubung — memakai data lokal (offline).', 'info');
+      return;
     }
+    const pending = this.unsynced();
+    if (!pending.length) return;
+    pending.forEach(key => {
+      try{
+        const raw = localStorage.getItem(key);
+        if (raw) this.cache[key] = JSON.parse(raw);
+      }catch(err){ console.error('Storage.hydrate: bad unsynced value', key, err); }
+    });
+    const sent = (await Promise.all(pending.map(key => this.push(key)))).filter(Boolean).length;
+    if (sent) Toast.show(`${sent} perubahan yang belum tersimpan sudah dikirim ke server.`, 'success');
   },
 
   get(key, fallback){
@@ -66,7 +93,15 @@ const Storage = {
   set(key, value){
     this.cache[key] = value;
     try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ console.error('Storage.set: localStorage write failed', key, e); }
-    fetch(`${API_BASE}/kv/${key}`, {
+    this.markUnsynced(key, true);
+    return this.push(key);
+  },
+
+  /* PUT the cached value; resolves true once the server confirmed it (2xx). */
+  push(key){
+    const mySeq = this.seq[key] = (this.seq[key] || 0) + 1;
+    this.inflight++;
+    return fetch(`${API_BASE}/kv/${key}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -74,16 +109,37 @@ const Storage = {
         'x-workspace': Auth.currentWorkspaceId() || '',
         'x-can-share': Auth.can('testcase_fileShare') ? '1' : '0'
       },
-      body: JSON.stringify({ value })
-    }).then(() => { this.serverOnline = true; })
-      .catch(e => {
-        if (this.serverOnline) Toast.show('Server database tidak terhubung, data disimpan lokal saja.', 'info');
-        this.serverOnline = false;
-        console.error('Storage.set: MySQL sync failed, kept in localStorage', key, e);
-      });
-    return true;
+      body: JSON.stringify({ value: this.cache[key] })
+    }).then(async res => {
+      this.serverOnline = true;
+      if (res.ok){
+        if (this.seq[key] === mySeq) this.markUnsynced(key, false);
+        return true;
+      }
+      if (res.status >= 400 && res.status < 500){
+        // Rejected (e.g. no permission) — retrying won't help, so don't keep re-sending it.
+        if (this.seq[key] === mySeq) this.markUnsynced(key, false);
+        const body = await res.json().catch(() => ({}));
+        Toast.show(`Gagal menyimpan: ${body.error || `ditolak server (HTTP ${res.status})`}`, 'error');
+        return false;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }).catch(e => {
+      if (this.serverOnline) Toast.show('Server tidak terhubung — perubahan disimpan di browser dan dikirim ulang saat aplikasi dibuka lagi.', 'error');
+      this.serverOnline = false;
+      console.error('Storage.push: server sync failed, kept as unsynced', key, e);
+      return false;
+    }).finally(() => { this.inflight--; });
   }
 };
+
+// Leaving (Back / close tab) while a save hasn't reached the server: let the browser ask first.
+if (typeof window !== 'undefined') window.addEventListener('beforeunload', e => {
+  if (!Storage.hasUnsynced()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
 
 /* ---------- Auto-increment ID generator (TC-0001 / BUG-0001) ---------- */
 /* "Tampilkan 10/25/50/100" next to a list's pagination. The module needs
@@ -104,15 +160,30 @@ function bindPageSize(selectId, module){
    never shown) and `code` = the BUG-0001 number people see, counted per
    workspace, so two workspaces may both have BUG-0001 without colliding. */
 function bugCode(b){ return (b && (b.code || b.id)) || ''; }
+// Same split for test cases: `id` = internal key, `code` = LOG-0001 shown, numbered per workspace + module prefix.
+/* List sorting: the "id" column sorts by the number people see (not the random
+   internal key), and numbers compare naturally so LOG-0002 < LOG-0010. */
+function compareRows(a, b, sortKey, sortDir, codeOf){
+  const val = r => (sortKey === 'id' ? codeOf(r) : r[sortKey]) ?? '';
+  const cmp = String(val(a)).localeCompare(String(val(b)), 'id', { numeric: true, sensitivity: 'base' });
+  return sortDir === 'asc' ? cmp : -cmp;
+}
+function tcCode(t){ return (t && (t.code || t.id)) || ''; }
+// Workspace a file belongs to — the scope for per-workspace numbering (null = shared file).
+function fileWorkspace(fileId){ const f = (App.state.files || []).find(x => x.id === fileId); return (f && f.workspaceId) || null; }
 
 const IdGen = {
-  // Per-scope counter: nextFor('BUG', 'WS-1') -> "BUG-0001", independent per workspace.
-  nextFor(prefix, scope){
-    const counters = Storage.get(STORAGE_KEYS.COUNTERS, {});
-    const key = `${prefix}@${scope || 'shared'}`;
-    counters[key] = (counters[key] || 0) + 1;
-    Storage.set(STORAGE_KEYS.COUNTERS, counters);
-    return `${prefix}-${String(counters[key]).padStart(4, '0')}`;
+  /* Next display number in a workspace = highest number still in use there + 1.
+     Computed from live data (no stored counter), so deleting test cases / bugs
+     frees their numbers: delete all -> back to 0001. Gaps in the middle stay
+     (nothing is renumbered — people refer to these numbers). */
+  nextInScope(prefix, codesInScope){
+    const re = new RegExp(`^${prefix}-(\\d+)$`);
+    const max = (codesInScope || []).reduce((m, c) => {
+      const hit = String(c).match(re);
+      return hit ? Math.max(m, parseInt(hit[1], 10)) : m;
+    }, 0);
+    return `${prefix}-${String(max + 1).padStart(4, '0')}`;
   },
   uid(prefix){ return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; },
   next(prefix){

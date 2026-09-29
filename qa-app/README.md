@@ -47,6 +47,7 @@ Saat dibuka dari `localhost`/`127.0.0.1` (atau langsung dari file), aplikasi mem
 - **Test Case** — tabel ala TestRail/Zephyr: Add/Edit/Delete/Duplicate, search realtime, filter multi-kolom, sorting, pagination, bulk delete & bulk update status, Import/Export Excel/CSV. Mode "Run" hanya mengisi **Actual Result** dan **Status**.
 - **TestForge (AI)** — generate draft test case dari teks BRS, screenshot aplikasi (maks. 5), atau deskripsi bebas memakai Google Gemini. Hasil masuk tahap review (edit/hapus per baris) dan baru disimpan ke Test Case saat klik **Save All**. API key diisi di Settings atau di `.env` server (`GEMINI_API_KEY`).
 - **Bug Report** — memilih Test Case ID otomatis mengisi Module, Feature, Scenario, Expected Result, Test Steps, dan Tester. Bug ID & Report Date digenerate otomatis. Status bug mengikuti daftar di **Master > Status Bug Report**.
+- **Penomoran per workspace** — Test Case `LOG-0001` (prefix 3 huruf dari Module) dan Bug `BUG-0001` berurutan mulai 0001 di setiap workspace. ID internal tetap unik, jadi admin di "Semua workspace" tidak tertukar. Nomor berikutnya = nomor tertinggi yang **masih ada** di workspace itu + 1, jadi setelah test case/bug dihapus nomornya dipakai lagi (hapus semua → mulai dari 0001). Celah di tengah tetap (tidak ada penomoran ulang).
 - **Share link bug** — tombol **🔗 Salin link** di Detail Bug menyalin link `…#bug=<id>`. Penerima (misalnya developer) login, lalu aplikasi otomatis pindah ke workspace bug tersebut dan membuka Detail Bug-nya. Akses tetap mengikuti workspace & permission; tanpa akses muncul pesan "Anda tidak punya akses ke bug ini".
 - **Failed → Create Bug** — Test Case berstatus *Failed* punya tombol "Create Bug" yang membuka form Bug Report dengan data Test Case terisi.
 - **Summary** — total, pass rate, fail rate, breakdown bug, filter Module/Feature/Tester/Tanggal, export PDF.
@@ -66,7 +67,7 @@ Saat dibuka dari `localhost`/`127.0.0.1` (atau langsung dari file), aplikasi mem
 
 ## Penyimpanan Data
 
-`Storage.hydrate()` (di `utils.js`) memuat semua data sekali saat aplikasi dibuka, lalu baca/tulis berjalan dari cache di memori. Setiap `Storage.set()` langsung menulis ke Local Storage lalu mengirim `PUT` ke API di background. Jika server mati, muncul toast "Server database tidak terhubung" dan data tetap tersimpan lokal.
+`Storage.hydrate()` (di `utils.js`) memuat semua data sekali saat aplikasi dibuka, lalu baca/tulis berjalan dari cache di memori. Setiap `Storage.set()` langsung menulis ke Local Storage lalu mengirim `PUT` ke API di background. Setiap perubahan ditandai *belum tersinkron* sampai server membalas sukses. Jika server mati / koneksi putus, perubahan tetap di browser dan **dikirim ulang otomatis** saat aplikasi dibuka lagi (tidak tertimpa data server yang lebih lama); menutup tab atau menekan Back selagi ada perubahan belum tersinkron memunculkan peringatan browser. Tombol Back/Forward browser berpindah antar halaman BugRail. Cek logika: `node qa-app/test/storage.check.js`.
 
 ## Keamanan — baca sebelum dipakai publik
 
