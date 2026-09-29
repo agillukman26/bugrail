@@ -1,0 +1,46 @@
+<style>
+.wc{background:var(--surface-2);border:0.5px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;display:flex;flex-direction:column;gap:12px}
+.wc:hover{border-color:var(--border-stronger)}
+.dot{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;flex-shrink:0}
+.st{background:var(--surface-1);border-radius:var(--radius);padding:8px 10px}
+.st b{display:block;font-size:16px;font-weight:500}
+.st span{font-size:11px;color:var(--text-muted)}
+.act{font-size:12px;color:var(--text-secondary);display:flex;gap:6px;align-items:center;padding:6px 0;border-top:0.5px solid var(--border)}
+</style>
+<h2 class="sr-only">Mockup halaman pilih workspace yang tampil setelah login di BugRail.</h2>
+<div style="border:0.5px solid var(--border);border-radius:12px;background:var(--surface-0);overflow:hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:var(--surface-2);border-bottom:0.5px solid var(--border)">
+    <div style="display:flex;align-items:center;gap:8px"><div class="dot" style="width:28px;height:28px;font-size:11px;background:var(--bg-accent);color:var(--text-accent)">QA</div><span style="font-size:14px;font-weight:500">BugRail</span></div>
+    <div style="display:flex;align-items:center;gap:14px;font-size:12px;color:var(--text-secondary)"><i class="ti ti-bell" aria-hidden="true" style="font-size:16px"></i><span><i class="ti ti-user" aria-hidden="true"></i> Rina (QA)</span><span>Logout</span></div>
+  </div>
+  <div id="picker" style="padding:24px 22px">
+    <div style="font-size:18px;font-weight:500">Selamat datang kembali, Rina</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin:2px 0 18px">Pilih workspace untuk mulai bekerja.</div>
+    <div id="cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;color:var(--text-secondary)">
+      <input type="checkbox" id="rem" checked style="width:16px;height:16px"><label for="rem">Langsung buka workspace terakhir saat login berikutnya</label>
+    </div>
+  </div>
+  <div id="enter" style="display:none;padding:40px 22px;text-align:center">
+    <div id="enterDot" class="dot" style="margin:0 auto 10px"></div>
+    <div id="enterTxt" style="font-size:15px;font-weight:500"></div>
+    <div style="font-size:13px;color:var(--text-secondary);margin:4px 0 16px">Anda akan diarahkan ke halaman Test Case workspace ini.</div>
+    <button id="back"><i class="ti ti-arrow-left" aria-hidden="true"></i> Kembali ke pilih workspace</button>
+  </div>
+</div>
+<script>
+const WS=[
+ {k:'erp',name:'New ERP',ini:'NE',role:'Admin',last:true,bg:'#EEEDFE',fg:'#3C3489',st:[['2','File'],['0','Test case'],['0','Bug terbuka']],act:['Terakhir dibuka 2 jam lalu','NEW ERP Dermaster diperbarui']},
+ {k:'saff',name:'Saffmedic',ini:'SM',role:'Anggota',last:false,bg:'#E1F5EE',fg:'#085041',st:[['1','File'],['0','Test case'],['0','Bug terbuka']],act:['Terakhir dibuka 3 hari lalu','Saffmedic x GLES dibuat']}
+];
+const $=id=>document.getElementById(id);
+const dk=()=>matchMedia('(prefers-color-scheme: dark)').matches;
+const c=w=>dk()?{bg:w.fg,fg:w.bg}:{bg:w.bg,fg:w.fg};
+$('cards').innerHTML=WS.map(w=>{const cc=c(w);return `<div class="wc" data-k="${w.k}">
+<div style="display:flex;align-items:center;gap:10px"><div class="dot" style="background:${cc.bg};color:${cc.fg}">${w.ini}</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:500">${w.name}</div><div style="font-size:12px;color:var(--text-muted)">Peran: ${w.role}</div></div>${w.last?`<span style="font-size:11px;padding:2px 8px;border-radius:var(--radius);background:${cc.bg};color:${cc.fg}">Terakhir</span>`:''}</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">${w.st.map(s=>`<div class="st"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('')}</div>
+<div>${w.act.map((a,i)=>`<div class="act"><i class="ti ${i?'ti-file':'ti-clock'}" aria-hidden="true"></i>${a}</div>`).join('')}</div>
+<div style="font-size:13px;color:${cc.fg};display:flex;align-items:center;gap:4px;font-weight:500">Buka workspace <i class="ti ti-arrow-right" aria-hidden="true"></i></div></div>`}).join('')+`<div class="wc" style="border-style:dashed;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;min-height:150px"><i class="ti ti-plus" aria-hidden="true" style="font-size:20px"></i>Buat workspace baru</div>`;
+document.querySelectorAll('.wc[data-k]').forEach(el=>el.onclick=()=>{const w=WS.find(x=>x.k===el.dataset.k),cc=c(w);$('enterDot').textContent=w.ini;$('enterDot').style.background=cc.bg;$('enterDot').style.color=cc.fg;$('enterTxt').textContent='Membuka workspace '+w.name;$('picker').style.display='none';$('enter').style.display='block'});
+$('back').onclick=()=>{$('enter').style.display='none';$('picker').style.display='block'};
+</script>

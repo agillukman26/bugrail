@@ -35,6 +35,7 @@ const Auth = {
   PERMISSION_KEYS: [
     { key: 'dashboard', label: 'Dashboard (lihat)' },
     { key: 'summary', label: 'Summary (lihat)' },
+    { key: 'report', label: 'Report Go-Live (lihat & export)' },
     { key: 'testcase_create', label: 'Test Case — Tambah' },
     { key: 'testcase_read', label: 'Test Case — Lihat' },
     { key: 'testcase_update', label: 'Test Case — Edit' },
@@ -57,7 +58,7 @@ const Auth = {
      stored in settings.rolePermissions. Admin is always full-access and never
      goes through this matrix (see can(), hardcoded to avoid self-lockout). */
   DEFAULT_ROLE_PERMISSIONS: {
-    pm_ba: { dashboard: true, summary: true, bugreport_read: true, bugreport_updateStatusPriority: true },
+    pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_updateStatusPriority: true },
     qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true },
     qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true },
     user_umum: { testcase_read: true, bugreport_read: true }
@@ -70,7 +71,14 @@ const Auth = {
   },
   isAdmin(){ return this.role() === 'admin'; },
   currentEmail(){ return sessionStorage.getItem(this.EMAIL_KEY); },
-  currentWorkspaceId(){ return sessionStorage.getItem(this.WORKSPACE_KEY) || null; },
+  // Active workspace id, or null for none / admin's "Semua workspace" (see workspace.js).
+  currentWorkspaceId(){
+    const v = sessionStorage.getItem(this.WORKSPACE_KEY);
+    return v && v !== WorkspaceCalc.ALL ? v : null;
+  },
+  /* True when nothing should be filtered by workspace: admin on "Semua workspace"
+     (or an admin with no workspace chosen). Single source for every data view. */
+  seesAllWorkspaces(){ return this.isAdmin() && !this.currentWorkspaceId(); },
 
   /* ---- Workspace CRUD (settings.workspaces) — separates files per team/department.
      A file with no workspaceId (legacy data, or created by a workspace-less admin)
@@ -100,9 +108,9 @@ const Auth = {
      or created by a workspace-less admin). A file can also be explicitly
      shared with other workspaces via `sharedWith` (array of workspace ids),
      set through shareFile() — gated by the testcase_fileShare permission.
-     Admin always sees every file. */
+     Admin sees every file on "Semua workspace", otherwise the active one's. */
   visibleFiles(allFiles){
-    if (this.isAdmin()) return allFiles;
+    if (this.seesAllWorkspaces()) return allFiles;
     const ws = this.currentWorkspaceId();
     return allFiles.filter(f => !f.workspaceId || f.workspaceId === ws || (f.sharedWith || []).includes(ws));
   },
@@ -116,7 +124,7 @@ const Auth = {
   },
 
   deleteWorkspace(id){
-    const inUse = (App.state.settings.users || []).some(u => u.workspaceId === id);
+    const inUse = (App.state.settings.users || []).some(u => WorkspaceCalc.userWorkspaceIds(u).includes(id));
     if (inUse) return { ok: false, error: 'Workspace masih dipakai user, pindahkan user tersebut dulu.' };
     App.state.settings.workspaces = this.workspaces().filter(w => w.id !== id);
     App.saveSettings();
@@ -176,6 +184,23 @@ const Auth = {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
   },
 
+  /* <option>s for an "Assign ke" select — every registered account. Keeps a
+     no-longer-registered assignee selectable so editing doesn't silently drop it. */
+  userOptions(selected = ''){
+    const users = (App.state.settings.users || []).map(u => u.email).filter(Boolean);
+    if (selected && !users.some(e => this.normalizeEmail(e) === this.normalizeEmail(selected))) users.push(selected);
+    return `<option value="">— Belum di-assign —</option>` + users.sort()
+      .map(e => `<option value="${escapeHtml(e)}" ${this.normalizeEmail(e) === this.normalizeEmail(selected) ? 'selected' : ''}>${escapeHtml(e)}</option>`).join('');
+  },
+
+  /* Appends to item.assignments when the assignee actually changes — the
+     notification bell (notifications.js) reads this log. */
+  logAssignment(item, prevAssignee, nextAssignee){
+    if (this.normalizeEmail(prevAssignee || '') === this.normalizeEmail(nextAssignee || '')) return;
+    if (!item.assignments) item.assignments = [];
+    item.assignments.push({ at: nowISO(), to: nextAssignee || '', by: this.currentEmail() || 'unknown' });
+  },
+
   findByEmail(users, email){
     const target = this.normalizeEmail(email);
     return (users || []).find(u => this.normalizeEmail(u.email) === target) || null;
@@ -201,16 +226,19 @@ const Auth = {
     }
   },
 
-  /* ---- Login/session lifecycle ---- */
-  enter(role, email, workspaceId){
-    sessionStorage.setItem(this.ROLE_KEY, role);
-    sessionStorage.setItem(this.EMAIL_KEY, email);
-    if (workspaceId) sessionStorage.setItem(this.WORKSPACE_KEY, workspaceId);
-    else sessionStorage.removeItem(this.WORKSPACE_KEY);
+  /* ---- Login/session lifecycle ----
+     login -> (workspace picker, see workspace.js, when the account has 2+
+     workspaces) -> startApp(). A reload with a live session goes straight to
+     startApp() unless no valid workspace is active yet. */
+  startApp(){
     document.body.classList.remove('pre-auth');
     App.init();
-    ActivityLog.record('login', `${email} login sebagai ${role}`);
+    if (this._freshLogin){
+      ActivityLog.record('login', `${this.currentEmail()} login sebagai ${this.role()}`);
+      this._freshLogin = false;
+    }
     this.renderBadge();
+    return App.openDeepLink(); // #bug=… link: jump straight to that bug
   },
 
   login(email, password){
@@ -223,7 +251,11 @@ const Auth = {
       return;
     }
     errEl.textContent = '';
-    this.enter(user.role, this.normalizeEmail(email), user.workspaceId);
+    sessionStorage.setItem(this.ROLE_KEY, user.role);
+    sessionStorage.setItem(this.EMAIL_KEY, this.normalizeEmail(email));
+    sessionStorage.removeItem(this.WORKSPACE_KEY);
+    this._freshLogin = true;
+    if (WorkspacePicker.resolveOnStart()) this.startApp();
   },
 
   logout(){
@@ -264,11 +296,7 @@ const Auth = {
   init(){
     this.ensureSeedUsers();
     this.bindLoginScreen();
-    if (this.role()){
-      document.body.classList.remove('pre-auth');
-      App.init();
-      this.renderBadge();
-    }
+    if (this.role() && WorkspacePicker.resolveOnStart()) this.startApp();
     // else: stays in pre-auth state, login screen visible, App.init() deferred until login().
   },
 

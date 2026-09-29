@@ -1,0 +1,69 @@
+<style>
+.ws-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius);cursor:pointer;font-size:13px}
+.ws-row:hover{background:var(--surface-1)}
+.nav{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--radius);font-size:13px;color:var(--text-secondary)}
+.nav.on{background:var(--bg-accent);color:var(--text-accent);font-weight:500}
+.fcard{background:var(--surface-2);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px}
+.dot{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0}
+</style>
+<h2 class="sr-only">Mockup BugRail dengan workspace switcher untuk memisahkan Saffmedic dan New ERP.</h2>
+<div style="display:grid;grid-template-columns:190px minmax(0,1fr);border:0.5px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-0);min-height:460px">
+  <div style="background:var(--surface-2);border-right:0.5px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="dot" style="background:var(--bg-accent);color:var(--text-accent)">QA</div>
+      <div><div style="font-size:14px;font-weight:500">BugRail</div><div style="font-size:11px;color:var(--text-muted)">Test and bug suite</div></div>
+    </div>
+    <div style="position:relative">
+      <div style="font-size:11px;color:var(--text-muted);margin:0 0 4px 2px">Workspace</div>
+      <div id="wsBtn" class="ws-row" style="border:0.5px solid var(--border-strong)">
+        <div id="wsDot" class="dot"></div>
+        <div style="flex:1;min-width:0"><div id="wsName" style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div><div id="wsMeta" style="font-size:11px;color:var(--text-muted)"></div></div>
+        <i class="ti ti-selector" aria-hidden="true" style="font-size:16px;color:var(--text-muted)"></i>
+      </div>
+      <div id="wsMenu" style="display:none;margin-top:6px;background:var(--surface-2);border:0.5px solid var(--border-strong);border-radius:var(--radius);padding:4px"></div>
+    </div>
+    <div style="border-top:0.5px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:2px">
+      <div class="nav on"><i class="ti ti-checkbox" aria-hidden="true"></i>Test case</div>
+      <div class="nav"><i class="ti ti-bug" aria-hidden="true"></i>Bug report</div>
+      <div class="nav"><i class="ti ti-users" aria-hidden="true"></i>Anggota</div>
+    </div>
+    <div style="margin-top:auto;border-top:0.5px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary)"><span><i class="ti ti-user" aria-hidden="true"></i> User</span><span>Logout</span></div>
+  </div>
+  <div style="padding:16px 18px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <div>
+        <div style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px"><span id="crumb"></span><i class="ti ti-chevron-right" aria-hidden="true"></i><span>Test case</span></div>
+        <div style="font-size:18px;font-weight:500;margin-top:2px">Test case</div>
+      </div>
+      <button style="font-size:13px;white-space:nowrap"><i class="ti ti-plus" aria-hidden="true"></i> File baru</button>
+    </div>
+    <div id="banner" style="border-radius:var(--radius);padding:10px 12px;font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:8px"></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input placeholder="Cari file di workspace ini" style="flex:1" />
+    </div>
+    <div id="files" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px"></div>
+  </div>
+</div>
+<script>
+const WS={
+ saff:{name:'Saffmedic',ini:'SM',meta:'1 proyek · 3 anggota',bg:'#E1F5EE',fg:'#085041',bd:'#0F6E56',files:[{n:'Saffmedic x GLES',c:0,b:0}],bn:'Anda sedang berada di workspace Saffmedic. File dan bug di sini terpisah dari New ERP.'},
+ erp:{name:'New ERP',ini:'NE',meta:'2 proyek · 5 anggota',bg:'#EEEDFE',fg:'#3C3489',bd:'#534AB7',files:[{n:'New ERP DEX',c:0,b:0},{n:'NEW ERP Dermaster',c:0,b:0}],bn:'Anda sedang berada di workspace New ERP. File dan bug di sini terpisah dari Saffmedic.'}
+};
+let cur='erp';
+const $=id=>document.getElementById(id);
+function dark(){return matchMedia('(prefers-color-scheme: dark)').matches}
+function col(w){return dark()?{bg:w.fg,fg:w.bg,bd:w.bg}:{bg:w.bg,fg:w.fg,bd:w.bd}}
+function render(){
+ const w=WS[cur],c=col(w);
+ $('wsDot').textContent=w.ini;$('wsDot').style.background=c.bg;$('wsDot').style.color=c.fg;
+ $('wsName').textContent=w.name;$('wsMeta').textContent=w.meta;
+ $('crumb').textContent=w.name;
+ $('banner').style.background=c.bg;$('banner').style.color=c.fg;
+ $('banner').innerHTML='<i class="ti ti-info-circle" aria-hidden="true"></i>'+w.bn;
+ $('files').innerHTML=w.files.map(f=>`<div class="fcard" style="border-top:3px solid ${c.bd};border-radius:0 0 12px 12px"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:500"><i class="ti ti-folder" aria-hidden="true" style="color:${c.bd}"></i>${f.n}</div><i class="ti ti-dots-vertical" aria-hidden="true" style="color:var(--text-muted)"></i></div><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">${f.c} test case · ${f.b} bug</div></div>`).join('')+`<div class="fcard" style="border-style:dashed;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;gap:6px"><i class="ti ti-plus" aria-hidden="true"></i>Tambah file</div>`;
+ $('wsMenu').innerHTML=Object.entries(WS).map(([k,v])=>{const cc=col(v);return `<div class="ws-row" data-k="${k}"><div class="dot" style="background:${cc.bg};color:${cc.fg}">${v.ini}</div><div style="flex:1">${v.name}</div>${k===cur?'<i class="ti ti-check" aria-hidden="true" style="color:var(--text-accent)"></i>':''}</div>`}).join('')+'<div style="border-top:0.5px solid var(--border);margin:4px 0"></div><div class="ws-row" style="color:var(--text-secondary)"><i class="ti ti-plus" aria-hidden="true"></i>Workspace baru</div>';
+ document.querySelectorAll('#wsMenu [data-k]').forEach(el=>el.onclick=()=>{cur=el.dataset.k;$('wsMenu').style.display='none';render()});
+}
+$('wsBtn').onclick=()=>{const m=$('wsMenu');m.style.display=m.style.display==='none'?'block':'none'};
+render();
+</script>

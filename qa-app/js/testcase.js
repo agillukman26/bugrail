@@ -32,7 +32,7 @@ const TestCaseModule = {
     selected: new Set(),
     editingId: null,
     executingId: null,
-    activeFileId: sessionStorage.getItem('qa_tc_active_file') || null
+    activeFileId: null
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
@@ -47,12 +47,10 @@ const TestCaseModule = {
   fileCount(fileId){ return App.state.testcases.filter(t => t.fileId === fileId).length; },
   openFile(fileId){
     this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
-    sessionStorage.setItem('qa_tc_active_file', fileId);
     this.render();
   },
   backToFiles(){
     this.ui.activeFileId = null; this.ui.search = '';
-    sessionStorage.removeItem('qa_tc_active_file');
     const globalSearch = document.getElementById('globalSearch');
     if (globalSearch) globalSearch.value = '';
     this.render();
@@ -60,7 +58,7 @@ const TestCaseModule = {
   createFile(name, workspaceId = Auth.currentWorkspaceId()){
     name = (name || '').trim();
     if (!name) return;
-    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdAt: nowISO() };
+    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
     App.state.files.push(file);
     App.saveFiles();
     ActivityLog.record('tc_file_create', `File Test Case "${name}" dibuat`);
@@ -91,13 +89,11 @@ const TestCaseModule = {
   async deleteFile(fileId){
     if (!Auth.isAdmin()){ Toast.show('Hanya Admin yang dapat menghapus file.', 'error'); return; }
     const file = this.files().find(f => f.id === fileId);
-    const count = this.fileCount(fileId);
-    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${count} test case di dalamnya akan dihapus permanen.`, 'Hapus');
+    const tcCount = App.state.testcases.filter(t => t.fileId === fileId).length;
+    const bugCount = App.state.bugs.filter(b => b.fileId === fileId).length;
+    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${tcCount} test case dan ${bugCount} bug di dalamnya akan dihapus permanen.`, 'Hapus');
     if (!ok) return;
-    App.state.files = App.state.files.filter(f => f.id !== fileId);
-    App.state.testcases = App.state.testcases.filter(t => t.fileId !== fileId);
-    App.saveFiles();
-    App.saveTestcases();
+    App.deleteFileCascade(fileId);
     ActivityLog.record('tc_file_delete', `File Test Case "${file.name}" dihapus`);
     if (this.ui.activeFileId === fileId) this.ui.activeFileId = null;
     this.render();
@@ -106,7 +102,7 @@ const TestCaseModule = {
 
   /* ---- data access ---- */
   all(){
-    if (Auth.isAdmin()) return App.state.testcases;
+    if (Auth.seesAllWorkspaces()) return App.state.testcases;
     const visibleIds = new Set(this.files().map(f => f.id));
     return App.state.testcases.filter(tc => !tc.fileId || visibleIds.has(tc.fileId));
   },
@@ -116,7 +112,7 @@ const TestCaseModule = {
     let rows = this.all().filter(tc => {
       if (activeFileId && tc.fileId !== activeFileId) return false;
       if (search){
-        const hay = `${tc.id} ${tc.module} ${tc.roleUser||''} ${tc.scenario} ${tc.testCase||''} ${tc.preconditions||''} ${stripHtml(tc.steps||'')} ${tc.testData||''} ${tc.expectedResult||''} ${tc.actualResult||''}`.toLowerCase();
+        const hay = `${tc.id} ${tc.module} ${tc.roleUser||''} ${tc.scenario} ${tc.testCase||''} ${tc.preconditions||''} ${stripHtml(tc.steps||'')} ${tc.testData||''} ${tc.expectedResult||''} ${tc.actualResult||''} ${tc.evidence||''}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -139,13 +135,9 @@ const TestCaseModule = {
 
   /* ---- render ---- */
   render(){
-    // Reload lands with activeFileId restored from sessionStorage — if that
-    // file was deleted, or its workspace no longer shares it with this user,
-    // fall back to the file list instead of showing a stuck empty detail view.
-    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)){
-      this.ui.activeFileId = null;
-      sessionStorage.removeItem('qa_tc_active_file');
-    }
+    // If the open file was deleted or is no longer shared with this user,
+    // fall back to the file list instead of a stuck empty detail view.
+    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)) this.ui.activeFileId = null;
     const searching = !!this.ui.search;
     const inFile = !!this.ui.activeFileId || searching;
     document.getElementById('tcFileListView').style.display = inFile ? 'none' : 'block';
@@ -202,6 +194,7 @@ const TestCaseModule = {
         <td class="truncate" title="${escapeHtml(tc.testCase)}">${escapeHtml(tc.testCase || '-')}</td>
         <td>${escapeHtml(tc.typeTest || '-')}</td>
         <td>${this.statusBadge(tc.status)}</td>
+        <td>${this.evidenceCell(tc.evidence)}</td>
         <td class="col-hidden">${formatDate(tc.executionDate)}</td>
         <td class="cell-actions">
           <div class="dropdown">
@@ -236,25 +229,28 @@ const TestCaseModule = {
     wrap.innerHTML = files.map(f => {
       const shareCount = (f.sharedWith || []).length;
       return `
-      <div class="card tc-file-card" data-open="${f.id}">
+      <div class="card tc-file-card ${f.workspaceId ? 'ws-colored' : ''}" data-open="${f.id}" style="--ws-fg:${WorkspaceCalc.colorFor(Auth.workspaces(), f.workspaceId)[1]};">
         <div class="flex-between">
           <h3 style="margin:0; font-size:14.5px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
-          ${actionMenu(`
+          <div class="file-card-actions"><button class="file-info-btn" type="button" data-info="${f.id}" title="Detail file" aria-label="Detail file"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>${actionMenu(`
             <button data-act="edit" data-id="${f.id}">✎ Edit</button>
             <button class="danger" data-act="del" data-id="${f.id}">🗑 Hapus</button>
-          `)}
+          `)}</div>
         </div>
         <div class="flex-between" style="margin-top:8px;">
-          <p class="text-faint" style="font-size:12.5px; margin:0;">${counts[f.id] || 0} test case</p>
+          <p class="text-faint" style="font-size:12.5px; margin:0;">${App.state.testcases.filter(t => t.fileId === f.id).length} test case · ${App.state.bugs.filter(b => b.fileId === f.id).length} bug</p>
           ${shareCount ? `<span class="badge st-notrun" title="Dibagikan ke ${shareCount} workspace">📤 ${shareCount}</span>` : ''}
         </div>
       </div>
     `;
-    }).join('');
+    }).join('') + (Auth.can('testcase_create') ? `<button class="card tc-file-card tc-file-add" type="button" id="tcNewFileAddCard">+ Tambah file</button>` : '');
     wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', (e) => {
-      if (e.target.closest('.action-menu')) return;
+      if (e.target.closest('.action-menu, .file-info-btn')) return;
       this.openFile(el.dataset.open);
     }));
+    const addCard = document.getElementById('tcNewFileAddCard');
+    if (addCard) addCard.onclick = () => document.getElementById('tcNewFileBtn').click();
+    wrap.querySelectorAll('.file-info-btn').forEach(btn => { btn.onclick = () => App.showFileDetail(btn.dataset.info); });
     wrap.querySelectorAll('.action-menu button[data-act]').forEach(btn => {
       btn.onclick = async () => {
         const { act, id } = btn.dataset;
@@ -267,6 +263,16 @@ const TestCaseModule = {
   statusBadge(status){
     const map = { 'Open':'notrun', 'Passed':'passed', 'Failed':'failed', 'Blocked':'blocked', 'Retest':'retest' };
     return `<span class="badge st-${map[status]}"><span class="dot"></span>${status}</span>`;
+  },
+
+  /* Table cell: one link icon per URL in the evidence text; a note icon
+     (full text in the tooltip) when there's evidence but no URL. */
+  evidenceCell(evidence){
+    if (!evidence) return '-';
+    evidence = String(evidence); // imported cells can be numbers
+    const urls = evidence.match(/https?:\/\/[^\s<>"']+/g);
+    if (!urls) return `<span class="evidence-icon" title="${escapeHtml(evidence)}" aria-label="Evidence (teks)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg></span>`;
+    return urls.map(url => `<a class="evidence-icon" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="${escapeHtml(url)}" aria-label="Buka evidence"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`).join('');
   },
 
   renderFilterOptions(){
@@ -358,8 +364,10 @@ const TestCaseModule = {
       f.testData.value = tc.testData || '';
       f.expectedResult.value = tc.expectedResult || ''; f.actualResult.value = tc.actualResult || '';
       f.typeTest.value = tc.typeTest || 'Positive'; f.status.value = tc.status;
+      f.evidence.value = tc.evidence || '';
       f.executionDate.value = tc.executionDate || '';
-    } else {
+    }
+    if (!tc){
       this.setModule('');
       f.status.value = 'Open'; f.typeTest.value = 'Positive';
       stepsEditor.root.innerHTML = '';
@@ -497,6 +505,7 @@ const TestCaseModule = {
       preconditions: f.preconditions.value.trim(), steps: f.steps.value.trim(), testData: f.testData.value.trim(),
       expectedResult: f.expectedResult.value.trim(), actualResult: f.actualResult.value.trim(),
       typeTest: f.typeTest.value, status: f.status.value,
+      evidence: f.evidence.value.trim(),
       executionDate: f.executionDate.value,
       customFields: this.readCustomFields()
     };
@@ -511,7 +520,8 @@ const TestCaseModule = {
       Toast.show(`Test case ${this.ui.editingId} diperbarui.`, 'success');
     } else {
       const id = IdGen.next(moduleAbbrev(data.module));
-      App.state.testcases.push({ id, ...data, fileId: this.ui.activeFileId, createdAt: nowISO() });
+      const tc = { id, ...data, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
+      App.state.testcases.push(tc);
       ActivityLog.record('testcase_create', `Test Case ${id} dibuat`);
       Toast.show(`Test case ${id} dibuat.`, 'success');
     }
@@ -545,6 +555,7 @@ const TestCaseModule = {
           ${block('Test Data', escapeHtml(tc.testData || '-'))}
           ${block('Expected Result', escapeHtml(tc.expectedResult || '-'))}
           ${block('Actual Result', escapeHtml(tc.actualResult || '-'))}
+          ${block('Evidence', tc.evidence ? linkify(tc.evidence) : '-')}
         </div>
         <div class="bug-detail-side">
           <div class="bug-side-heading">Details</div>
@@ -553,6 +564,7 @@ const TestCaseModule = {
           ${sideField('Type Test', escapeHtml(tc.typeTest || '-'))}
           ${sideField('Status', this.statusBadge(tc.status))}
           ${sideField('Execution Date', tc.executionDate ? formatDate(tc.executionDate) : '-')}
+          ${sideField('Dibuat oleh', escapeHtml(tc.createdBy || '-'))}
         </div>
       </div>`;
     document.getElementById('tcDetailModalOverlay').classList.add('active');
@@ -566,6 +578,7 @@ const TestCaseModule = {
     document.getElementById('runExpected').textContent = tc.expectedResult || '-';
     const f = document.getElementById('runForm');
     f.actualResult.value = tc.actualResult || '';
+    f.evidence.value = tc.evidence || '';
     f.status.value = tc.status;
     document.getElementById('runModalOverlay').classList.add('active');
   },
@@ -577,6 +590,7 @@ const TestCaseModule = {
     const from = App.state.testcases[idx].status;
     const id = App.state.testcases[idx].id;
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
+    App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
     App.state.testcases[idx].executionDate = todayISO();
     App.saveTestcases();
@@ -590,7 +604,7 @@ const TestCaseModule = {
     if (!Auth.can('testcase_create')) return;
     const tc = this.all().find(t => t.id === id);
     const newId = IdGen.next(moduleAbbrev(tc.module));
-    App.state.testcases.push({ ...tc, id: newId, fileId: tc.fileId, status:'Open', actualResult:'', executionDate:'', createdAt: nowISO() });
+    App.state.testcases.push({ ...tc, id: newId, fileId: tc.fileId, status:'Open', actualResult:'', evidence:'', executionDate:'', createdBy: Auth.currentEmail() || '', createdAt: nowISO() });
     App.saveTestcases();
     this.render();
     Toast.show(`Duplikat dibuat sebagai ${newId}.`, 'success');
@@ -665,9 +679,9 @@ const TestCaseModule = {
             preconditions: r['Pre Kondisi'] || r.Preconditions || r.preconditions || '',
             steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
             expectedResult: r['Expected Result'] || r.expectedResult || '',
-            actualResult: '', status: 'Open',
+            actualResult: '', evidence: r['Evidence'] || r.evidence || '', status: 'Open',
             typeTest: r['Type Test'] || r.typeTest || 'Positive',
-            executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdAt: nowISO()
+            executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
           });
           count++;
         });
@@ -699,6 +713,7 @@ const TestCaseModule = {
       { key:'expectedResult', label:'Expected Result', width:26 },
       { key:'actualResult', label:'Actual Result', width:26 },
       { key:'status', label:'Status', width:12, list:this.STATUS },
+      { key:'evidence', label:'Evidence', width:26 },
       { key:'executionDate', label:'Execution Date', width:14 }
     ];
     this.customFieldDefs().forEach(d => cols.push({ key: d.label, label: d.label, width: 20 }));
@@ -757,7 +772,7 @@ const TestCaseModule = {
 
   /* One sheet per Module (respects current search/filter via this.filtered()). */
   async exportExcel(){
-    const cols = this.exportColumns();
+    const cols = [{ key:'no', label:'No', width:6 }, ...this.exportColumns()];
     const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
 
     const byModule = new Map();
@@ -770,7 +785,8 @@ const TestCaseModule = {
     const wb = new ExcelJS.Workbook();
     const usedNames = new Set();
     byModule.forEach((moduleRows, moduleName) => {
-      this.buildSheet(wb, this.safeSheetName(moduleName, usedNames), cols, moduleRows);
+      // Numbering restarts per sheet (one sheet per module).
+      this.buildSheet(wb, this.safeSheetName(moduleName, usedNames), cols, moduleRows.map((r, i) => ({ ...r, no: i + 1 })));
     });
 
     const buf = await wb.xlsx.writeBuffer();
@@ -779,8 +795,8 @@ const TestCaseModule = {
     Toast.show('Export Excel Test Case berhasil.', 'success');
   },
   exportCSV(){
-    const cols = this.exportColumns();
-    const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || '') }));
+    const cols = [{ key:'no', label:'No' }, ...this.exportColumns()];
+    const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1 }));
     downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     Toast.show('Export CSV Test Case berhasil (siap import ke Google Spreadsheet).', 'success');
@@ -790,6 +806,7 @@ const TestCaseModule = {
   },
 
   bindStaticEvents(){
+    bindPageSize('tcPageSize', this);
     stepsEditor = new Quill('#tcStepsEditor', {
       theme: 'snow',
       modules: {

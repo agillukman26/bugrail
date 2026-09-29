@@ -7,6 +7,8 @@ const ALLOWED_KEYS = new Set(['qa_testcases', 'qa_bugs', 'qa_files', 'qa_setting
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+// Serve the frontend too, so local dev is just `npm start` + http://localhost:3001
+app.use(express.static(require('path').join(__dirname, '..', 'qa-app')));
 
 // All KV pairs at once — used for the one-time hydrate on app boot.
 app.get('/api/kv', async (req, res) => {

@@ -27,13 +27,18 @@ const BugReportModule = {
   ui: {
     search: '', filters: { module:'', severity:'', priority:'', status:'', tester:'' },
     sortKey: 'reportDate', sortDir: 'desc', page: 1, pageSize: 10,
-    selected: new Set(), editingId: null, activeFileId: sessionStorage.getItem('qa_bug_active_file') || null,
+    selected: new Set(), editingId: null, activeFileId: null,
     view: 'table', detailId: null, chatTab: 'comment'
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
+  // Display number, counted per workspace of the file the bug lives in.
+  nextCode(fileId){
+    const file = App.state.files.find(f => f.id === fileId);
+    return IdGen.nextFor('BUG', file && file.workspaceId);
+  },
   all(){
-    if (Auth.isAdmin()) return App.state.bugs;
+    if (Auth.seesAllWorkspaces()) return App.state.bugs;
     const visibleIds = new Set(this.files().map(f => f.id));
     return App.state.bugs.filter(b => !b.fileId || visibleIds.has(b.fileId));
   },
@@ -44,7 +49,7 @@ const BugReportModule = {
   createFile(name, workspaceId = Auth.currentWorkspaceId()){
     name = (name || '').trim();
     if (!name) return;
-    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdAt: nowISO() };
+    const file = { id: 'FILE-' + Date.now(), name, workspaceId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
     App.state.files.push(file);
     App.saveFiles();
     ActivityLog.record('bug_file_create', `File Bug Report "${name}" dibuat`);
@@ -75,26 +80,22 @@ const BugReportModule = {
   async deleteFile(fileId){
     if (!Auth.isAdmin()){ Toast.show('Hanya Admin yang dapat menghapus file.', 'error'); return; }
     const file = this.files().find(f => f.id === fileId);
-    const count = this.fileCount(fileId);
-    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${count} bug di dalamnya akan dihapus permanen.`, 'Hapus');
+    const tcCount = App.state.testcases.filter(t => t.fileId === fileId).length;
+    const bugCount = App.state.bugs.filter(b => b.fileId === fileId).length;
+    const ok = await confirmDialog('Hapus File?', `File "${file.name}" beserta ${tcCount} test case dan ${bugCount} bug di dalamnya akan dihapus permanen.`, 'Hapus');
     if (!ok) return;
-    App.state.files = App.state.files.filter(f => f.id !== fileId);
-    App.state.bugs = App.state.bugs.filter(b => b.fileId !== fileId);
-    App.saveFiles();
-    App.saveBugs();
+    App.deleteFileCascade(fileId);
     ActivityLog.record('bug_file_delete', `File Bug Report "${file.name}" dihapus`);
-    if (this.ui.activeFileId === fileId){ this.ui.activeFileId = null; sessionStorage.removeItem('qa_bug_active_file'); }
+    if (this.ui.activeFileId === fileId) this.ui.activeFileId = null;
     this.render();
     Toast.show(`File "${file.name}" dihapus.`, 'info');
   },
   openFile(fileId){
     this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
-    sessionStorage.setItem('qa_bug_active_file', fileId);
     this.render();
   },
   backToFiles(){
     this.ui.activeFileId = null; this.ui.search = '';
-    sessionStorage.removeItem('qa_bug_active_file');
     const globalSearch = document.getElementById('globalSearch');
     if (globalSearch) globalSearch.value = '';
     this.render();
@@ -105,7 +106,7 @@ const BugReportModule = {
     let rows = this.all().filter(b => {
       if (activeFileId && b.fileId !== activeFileId) return false;
       if (search){
-        const hay = `${b.id} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
+        const hay = `${bugCode(b)} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -129,13 +130,9 @@ const BugReportModule = {
   uniqueValues(field){ return [...new Set(this.all().map(b => b[field]).filter(Boolean))].sort(); },
 
   render(){
-    // Reload lands with activeFileId restored from sessionStorage — if that
-    // file was deleted, or its workspace no longer shares it with this user,
-    // fall back to the file list instead of showing a stuck empty detail view.
-    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)){
-      this.ui.activeFileId = null;
-      sessionStorage.removeItem('qa_bug_active_file');
-    }
+    // If the open file was deleted or is no longer shared with this user,
+    // fall back to the file list instead of a stuck empty detail view.
+    if (this.ui.activeFileId && !this.files().some(f => f.id === this.ui.activeFileId)) this.ui.activeFileId = null;
     const searching = !!this.ui.search;
     const inFile = !!this.ui.activeFileId || searching;
     document.getElementById('bugFileListView').style.display = inFile ? 'none' : 'block';
@@ -191,9 +188,9 @@ const BugReportModule = {
     document.getElementById('bugBulkDeleteBtn').style.display = canDelete ? '' : 'none';
     document.getElementById('bugBulkStatusSelect').style.display = canEdit ? '' : 'none';
     document.getElementById('bugTableBody').innerHTML = pageRows.map(b => `
-      <tr>
+      <tr class="row-clickable" data-id="${b.id}">
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
-        <td class="mono">${escapeHtml(b.id)}</td>
+        <td class="mono">${escapeHtml(bugCode(b))}</td>
         <td class="mono text-dim">${escapeHtml(b.testCaseId || '-')}</td>
         <td class="truncate" title="${escapeHtml(b.title)}">${escapeHtml(b.title)}</td>
         <td class="truncate" title="${escapeHtml(b.module)}">${escapeHtml(b.module)}</td>
@@ -229,25 +226,28 @@ const BugReportModule = {
     wrap.innerHTML = files.map(f => {
       const shareCount = (f.sharedWith || []).length;
       return `
-      <div class="card tc-file-card" data-open="${f.id}">
+      <div class="card tc-file-card ${f.workspaceId ? 'ws-colored' : ''}" data-open="${f.id}" style="--ws-fg:${WorkspaceCalc.colorFor(Auth.workspaces(), f.workspaceId)[1]};">
         <div class="flex-between">
           <h3 style="margin:0; font-size:14.5px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" data-open="${f.id}">📁 ${escapeHtml(f.name)}</h3>
-          ${actionMenu(`
+          <div class="file-card-actions"><button class="file-info-btn" type="button" data-info="${f.id}" title="Detail file" aria-label="Detail file"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></button>${actionMenu(`
             <button data-act="edit" data-id="${f.id}">✎ Edit</button>
             <button class="danger" data-act="del" data-id="${f.id}">🗑 Hapus</button>
-          `)}
+          `)}</div>
         </div>
         <div class="flex-between" style="margin-top:8px;">
-          <p class="text-faint" style="font-size:12.5px; margin:0;">${this.fileCount(f.id)} bug</p>
+          <p class="text-faint" style="font-size:12.5px; margin:0;">${App.state.testcases.filter(t => t.fileId === f.id).length} test case · ${App.state.bugs.filter(b => b.fileId === f.id).length} bug</p>
           ${shareCount ? `<span class="badge st-notrun" title="Dibagikan ke ${shareCount} workspace">📤 ${shareCount}</span>` : ''}
         </div>
       </div>
     `;
-    }).join('');
+    }).join('') + (Auth.can('bugreport_fileCreate') ? `<button class="card tc-file-card tc-file-add" type="button" id="bugNewFileAddCard">+ Tambah file</button>` : '');
     wrap.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', (e) => {
-      if (e.target.closest('.action-menu')) return;
+      if (e.target.closest('.action-menu, .file-info-btn')) return;
       this.openFile(el.dataset.open);
     }));
+    const addCard = document.getElementById('bugNewFileAddCard');
+    if (addCard) addCard.onclick = () => document.getElementById('bugNewFileBtn').click();
+    wrap.querySelectorAll('.file-info-btn').forEach(btn => { btn.onclick = () => App.showFileDetail(btn.dataset.info); });
     wrap.querySelectorAll('.action-menu button[data-act]').forEach(btn => {
       btn.onclick = async () => {
         const { act, id } = btn.dataset;
@@ -272,7 +272,7 @@ const BugReportModule = {
             ${items.map(b => `
               <div class="board-card" draggable="true" data-id="${b.id}">
                 <div class="board-card-top">
-                  <span class="mono text-dim" style="font-size:11px;">${escapeHtml(b.id)}</span>
+                  <span class="mono text-dim" style="font-size:11px;">${escapeHtml(bugCode(b))}</span>
                   ${this.severityBadge(b.severity)}
                 </div>
                 <div class="board-card-title">${escapeHtml(b.title)}</div>
@@ -304,21 +304,66 @@ const BugReportModule = {
     });
   },
 
-  setStatus(id, status){
+  async setStatus(id, status){
     if (!Auth.can('bugreport_board')) return;
     const bug = this.all().find(b => b.id === id);
     if (!bug || bug.status === status) return;
     const from = bug.status;
-    this.logActivity(bug, bug.status, status);
+    const change = await this.askStatusNote(`${bugCode(bug)}: ${from} → ${status}`);
+    if (!change) return;
+    this.logActivity(bug, bug.status, status, change);
     bug.status = status;
     App.saveBugs();
-    ActivityLog.record('bugreport_update', `Bug ${id} status diubah dari ${from} ke ${status} (board)`);
+    ActivityLog.record('bugreport_update', `Bug ${bugCode(bug)} status diubah dari ${from} ke ${status} (board): ${change.note}`);
     this.render();
   },
 
-  logActivity(bug, from, to){
+  logActivity(bug, from, to, change = {}){
     if (!bug.activity) bug.activity = [];
-    bug.activity.push({ at: nowISO(), from, to });
+    bug.activity.push({ at: nowISO(), from, to, note: change.note, attachment: change.attachment || '', email: Auth.currentEmail() || 'unknown' });
+  },
+
+  /* Every status change must carry a reason; attachment links are optional.
+     Resolves { note, attachment }, or null (with a toast) when cancelled. */
+  askStatusNote(label){
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay confirm-modal status-change-modal active';
+      overlay.innerHTML = `
+        <div class="modal">
+          <h2 style="margin:0 0 14px; font-size:17px;">${escapeHtml(`Perubahan status — ${label}`)}</h2>
+          <div class="field">
+            <label>Keterangan <span class="req">*</span></label>
+            <textarea id="statusNoteInput" placeholder="Alasan / keterangan perubahan status"></textarea>
+            <p class="combobox-error" id="statusNoteError" style="display:none;">Keterangan wajib diisi.</p>
+          </div>
+          <div class="field">
+            <label>Attachment <span class="text-faint">(opsional)</span></label>
+            <textarea id="statusAttachInput" placeholder="Link screenshot / video / dokumen, satu per baris"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" id="statusCancelBtn">Batal</button>
+            <button class="btn primary" id="statusOkBtn">Ubah Status</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const noteEl = overlay.querySelector('#statusNoteInput');
+      const errEl = overlay.querySelector('#statusNoteError');
+      noteEl.focus();
+      const close = value => {
+        overlay.remove();
+        if (!value) Toast.show('Status tidak diubah.', 'info');
+        resolve(value);
+      };
+      noteEl.addEventListener('input', () => { errEl.style.display = 'none'; noteEl.classList.remove('input-invalid'); });
+      overlay.querySelector('#statusCancelBtn').onclick = () => close(null);
+      overlay.querySelector('#statusOkBtn').onclick = () => {
+        const note = noteEl.value.trim();
+        if (!note){ errEl.style.display = 'block'; noteEl.classList.add('input-invalid'); noteEl.focus(); return; }
+        close({ note, attachment: overlay.querySelector('#statusAttachInput').value.trim() });
+      };
+      bindBackdropClose(overlay, () => close(null));
+    });
   },
 
   /* Times a bug bounced back to Reopened/Retest — i.e. how many retest rounds it
@@ -337,7 +382,7 @@ const BugReportModule = {
     document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
       el.classList.toggle('active', el.dataset.chatTab === 'comment');
     });
-    document.getElementById('bugDetailTitle').textContent = `Detail Bug — ${bug.id}`;
+    document.getElementById('bugDetailTitle').textContent = `Detail Bug — ${bugCode(bug)}`;
 
     /* Content blocks (description/steps/results) read like a document, so they
        live in the main column as titled cards. Short facts (status, severity,
@@ -375,6 +420,7 @@ const BugReportModule = {
           ${sideField('Priority', escapeHtml(bug.priority))}
           ${sideField('Module', escapeHtml(bug.module || '-'))}
           ${sideField('Tester', escapeHtml(bug.tester || '-'))}
+          ${sideField('Assign ke', escapeHtml(bug.assignee || '-'))}
           ${sideField('Report Date', bug.reportDate ? formatDate(bug.reportDate) : '-')}
           ${sideField('Jumlah Retest', retestCount ? `${retestCount}x (Reopened)` : 'Belum pernah')}
         </div>
@@ -382,6 +428,7 @@ const BugReportModule = {
 
     this.renderChat(bug);
     document.getElementById('bugChatSendBtn').onclick = () => this.addComment(bug.id);
+    document.getElementById('bugCopyLinkBtn').onclick = () => this.copyLink(bug);
     document.getElementById('bugDetailModalOverlay').classList.add('active');
   },
 
@@ -399,7 +446,7 @@ const BugReportModule = {
     const list = document.getElementById('bugChatList');
     const tab = this.ui.chatTab;
     let feed = [
-      ...(bug.activity || []).map(a => ({ type:'activity', at:a.at, from:a.from, to:a.to })),
+      ...(bug.activity || []).map(a => ({ type:'activity', at:a.at, from:a.from, to:a.to, note:a.note, attachment:a.attachment, email:a.email })),
       ...(bug.comments || []).map(c => ({ type:'comment', at:c.at, email:c.email, text:c.text }))
     ].sort((a,b) => new Date(a.at) - new Date(b.at));
     if (tab !== 'all') feed = feed.filter(item => item.type === tab);
@@ -412,7 +459,7 @@ const BugReportModule = {
 
     list.innerHTML = feed.map(item => {
       if (item.type === 'activity'){
-        return `<div class="bug-chat-notice">🔄 Status berubah <b>${escapeHtml(item.from)}</b> → <b>${escapeHtml(item.to)}</b> · ${formatDateTime(item.at)}</div>`;
+        return `<div class="bug-chat-notice">🔄 Status berubah <b>${escapeHtml(item.from)}</b> → <b>${escapeHtml(item.to)}</b>${item.email ? ` oleh ${escapeHtml(item.email)}` : ''} · ${formatDateTime(item.at)}${item.note ? `<div class="bug-chat-note">${linkify(item.note)}</div>` : ''}${item.attachment ? `<div class="bug-chat-note">📎 ${linkify(item.attachment)}</div>` : ''}</div>`;
       }
       const textHtml = escapeHtml(item.text).replace(/\n/g, '<br>')
         .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
@@ -424,6 +471,17 @@ const BugReportModule = {
       `;
     }).join('');
     list.scrollTop = list.scrollHeight;
+  },
+
+  // Link for follow-up: the developer logs in and lands on this bug (App.openDeepLink).
+  async copyLink(bug){
+    const link = App.bugLink(bug);
+    try{
+      await navigator.clipboard.writeText(link);
+      Toast.show(`Link ${bugCode(bug)} disalin — kirim ke developer.`, 'success');
+    }catch(e){
+      await promptDialog('Salin link bug', '', link, 'Tutup'); // clipboard blocked: show it to copy by hand
+    }
   },
 
   addComment(id){
@@ -440,9 +498,20 @@ const BugReportModule = {
   },
 
   severityBadge(sev){ return `<span class="badge sev-${sev.toLowerCase()}"><span class="dot"></span>${sev}</span>`; },
+  /* Status options always come from Settings > Master > Status Bug Report.
+     A bug still holding a status that's no longer in the master (legacy data)
+     keeps it as an extra option, so opening/saving it doesn't silently change it. */
+  statusOptions(selected = '', extra = []){
+    const list = [...this.STATUS];
+    [selected, ...extra].forEach(v => { if (v && !list.includes(v)) list.push(v); });
+    return list.map(v => `<option value="${escapeHtml(v)}" ${v === selected ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+  },
+
   statusBadge(status){
+    const m = this.statusMaster().find(s => s.name === status);
+    if (m && m.color) return `<span class="badge" style="color:${m.color}; background:color-mix(in srgb, ${m.color} 14%, transparent);">${escapeHtml(status)}</span>`;
     const map = { 'Open':'open','Assigned':'assigned','In Progress':'inprogress','Ready To Test':'readytotest','Reopened':'reopened','Closed':'closed' };
-    return `<span class="badge bug-${map[status]}">${status}</span>`;
+    return `<span class="badge bug-${map[status] || 'open'}">${escapeHtml(status)}</span>`;
   },
 
   renderFilterOptions(){
@@ -454,6 +523,10 @@ const BugReportModule = {
     };
     build('bugFilterModule', 'module');
     build('bugFilterTester', 'tester');
+    const statusEl = document.getElementById('bugFilterStatus');
+    statusEl.innerHTML = `<option value="">${statusEl.dataset.label}</option>` +
+      this.statusOptions(this.ui.filters.status, this.uniqueValues('status'));
+    document.getElementById('bugBulkStatusSelect').innerHTML = `<option value="">Ubah status ke...</option>` + this.statusOptions();
   },
 
   resetFilters(){
@@ -485,6 +558,10 @@ const BugReportModule = {
   },
 
   bindRowEvents(){
+    // Click anywhere on a row opens the detail; checkbox / action menu keep their own behaviour.
+    document.querySelectorAll('#bugTableBody tr[data-id]').forEach(tr => {
+      tr.onclick = e => { if (!e.target.closest('input, button, a, .dropdown')) this.openDetail(tr.dataset.id); };
+    });
     document.querySelectorAll('.bug-row-check').forEach(cb => {
       cb.onchange = () => { cb.checked ? this.ui.selected.add(cb.dataset.id) : this.ui.selected.delete(cb.dataset.id); this.render(); };
     });
@@ -513,14 +590,15 @@ const BugReportModule = {
     this.ui.editingId = bugId;
     const f = document.getElementById('bugForm');
     f.reset();
+    f.assignee.innerHTML = Auth.userOptions(bugId ? (this.all().find(b => b.id === bugId) || {}).assignee : '');
     if (bug) this.ui.activeFileId = bug.fileId;
     else if (prefillTestCaseId){
       const tc = App.state.testcases.find(t => t.id === prefillTestCaseId);
       if (tc) this.ui.activeFileId = tc.fileId;
     }
 
-    document.getElementById('bugModalTitle').textContent = bug ? `Edit Bug — ${bug.id}` : 'Buat Bug Report';
-    document.getElementById('bugFieldId').value = bug ? bug.id : '(auto generate)';
+    document.getElementById('bugModalTitle').textContent = bug ? `Edit Bug — ${bugCode(bug)}` : 'Buat Bug Report';
+    document.getElementById('bugFieldId').value = bug ? bugCode(bug) : '(auto generate, nomor per workspace)';
     document.getElementById('bugFieldDate').value = bug ? formatDate(bug.reportDate) : formatDate(todayISO());
 
     if (bug){
@@ -529,12 +607,14 @@ const BugReportModule = {
       this.setTestCase(bug.testCaseId || null, true);
       f.title.value = bug.title; f.description.value = bug.description;
       f.actualResult.value = bug.actualResult || '';
-      f.severity.value = bug.severity; f.priority.value = bug.priority; f.status.value = bug.status;
+      f.severity.value = bug.severity; f.priority.value = bug.priority;
+      f.status.innerHTML = this.statusOptions(bug.status);
       f.environment.value = bug.environment || ''; f.browser.value = bug.browser || '';
       f.os.value = bug.os || ''; f.device.value = bug.device || ''; f.buildVersion.value = bug.buildVersion || '';
       f.attachments.value = bug.attachments || ''; f.tester.value = bug.tester || '';
     } else {
-      f.severity.value = 'Medium'; f.priority.value = 'Medium'; f.status.value = 'Open';
+      f.severity.value = 'Medium'; f.priority.value = 'Medium';
+      f.status.innerHTML = this.statusOptions(); // first status in master order
       f.tester.value = Auth.currentEmail() || '';
       this.setTestCase(prefillTestCaseId || null, true);
     }
@@ -612,7 +692,7 @@ const BugReportModule = {
     if (!silent) Toast.show('Field Test Case otomatis terisi.', 'info', { duration: 1800 });
   },
 
-  submitForm(e){
+  async submitForm(e){
     e.preventDefault();
     const f = e.target;
     const data = {
@@ -623,7 +703,8 @@ const BugReportModule = {
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
       environment: f.environment.value.trim(), browser: f.browser.value.trim(),
       os: f.os.value.trim(), device: f.device.value.trim(), buildVersion: f.buildVersion.value.trim(),
-      attachments: f.attachments.value.trim()
+      attachments: f.attachments.value.trim(),
+      assignee: f.assignee.value
     };
     if (!data.title || !data.actualResult){
       Toast.show('Bug Title dan Actual Result wajib diisi.', 'error'); return;
@@ -631,15 +712,22 @@ const BugReportModule = {
     if (this.ui.editingId){
       const idx = App.state.bugs.findIndex(b => b.id === this.ui.editingId);
       const prev = App.state.bugs[idx];
-      if (prev.status !== data.status) this.logActivity(prev, prev.status, data.status);
+      let change = null;
+      if (prev.status !== data.status){
+        change = await this.askStatusNote(`${bugCode(prev)}: ${prev.status} → ${data.status}`);
+        if (!change) return; // form stays open so nothing typed is lost
+        this.logActivity(prev, prev.status, data.status, change);
+      }
+      Auth.logAssignment(prev, prev.assignee, data.assignee);
       App.state.bugs[idx] = { ...prev, ...data };
-      ActivityLog.record('bugreport_update', `Bug ${this.ui.editingId} diperbarui`);
-      Toast.show(`Bug ${this.ui.editingId} diperbarui.`, 'success');
+      ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}: ${change.note})` : ''}`);
+      Toast.show(`Bug ${bugCode(prev)} diperbarui.`, 'success');
     } else {
-      const id = IdGen.next('BUG');
-      App.state.bugs.push({ id, ...data, fileId: this.ui.activeFileId, reportDate: nowISO() });
-      ActivityLog.record('bugreport_create', `Bug ${id} dibuat`);
-      Toast.show(`Bug ${id} dibuat.`, 'success');
+      const bug = { id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, reportDate: nowISO() };
+      Auth.logAssignment(bug, '', data.assignee);
+      App.state.bugs.push(bug);
+      ActivityLog.record('bugreport_create', `Bug ${bug.code} dibuat`);
+      Toast.show(`Bug ${bug.code} dibuat.`, 'success');
     }
     App.saveBugs();
     this.closeForm();
@@ -648,13 +736,14 @@ const BugReportModule = {
 
   async remove(id){
     if (!Auth.can('bugreport_delete')){ Toast.show('Tidak punya izin menghapus Bug Report.', 'error'); return; }
-    const ok = await confirmDialog('Hapus Bug Report?', `${id} akan dihapus.`);
+    const code = bugCode(App.state.bugs.find(b => b.id === id));
+    const ok = await confirmDialog('Hapus Bug Report?', `${code} akan dihapus.`);
     if (!ok) return;
     const idx = App.state.bugs.findIndex(b => b.id === id);
     const removed = App.state.bugs.splice(idx,1)[0];
-    ActivityLog.record('bugreport_delete', `Bug ${id} dihapus`);
+    ActivityLog.record('bugreport_delete', `Bug ${code} dihapus`);
     App.saveBugs(); this.ui.selected.delete(id); this.render();
-    Toast.show(`${id} dihapus.`, 'info', { undo: () => { App.state.bugs.splice(idx,0,removed); App.saveBugs(); this.render(); } });
+    Toast.show(`${code} dihapus.`, 'info', { undo: () => { App.state.bugs.splice(idx,0,removed); App.saveBugs(); this.render(); } });
   },
 
   async bulkDelete(){
@@ -669,18 +758,20 @@ const BugReportModule = {
     Toast.show(`${ids.length} bug dihapus.`, 'info', { undo: () => { App.state.bugs.push(...removed); App.saveBugs(); this.render(); } });
   },
 
-  bulkUpdateStatus(status){
+  async bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status) return;
+    const change = await this.askStatusNote(`${this.ui.selected.size} bug → ${status}`);
+    if (!change) return;
     let changed = 0;
     App.state.bugs.forEach(b => {
       if (this.ui.selected.has(b.id) && b.status !== status){
-        this.logActivity(b, b.status, status);
+        this.logActivity(b, b.status, status, change);
         b.status = status;
         changed++;
       }
     });
     App.saveBugs(); this.render();
-    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)`);
+    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk): ${change.note}`);
     Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
   },
 
@@ -693,7 +784,7 @@ const BugReportModule = {
   /* ---- Export ---- */
   exportExcel(){
     const rows = this.filtered().map(b => ({
-      'Bug ID': b.id, 'Test Case ID': b.testCaseId || '', Module: b.module,
+      'Bug ID': bugCode(b), 'Test Case ID': b.testCaseId || '', Module: b.module,
       Scenario: b.scenario, 'Bug Title': b.title, Description: b.description,
       'Expected Result': b.expectedResult, 'Actual Result': b.actualResult,
       Severity: b.severity, Priority: b.priority, Status: b.status, Tester: b.tester,
@@ -710,7 +801,7 @@ const BugReportModule = {
   },
   exportCSV(){
     const cols = [
-      {key:'id',label:'Bug ID'},{key:'testCaseId',label:'Test Case ID'},{key:'module',label:'Module'},
+      {key:'code',label:'Bug ID'},{key:'testCaseId',label:'Test Case ID'},{key:'module',label:'Module'},
       {key:'scenario',label:'Scenario'},{key:'title',label:'Bug Title'},
       {key:'description',label:'Description'},{key:'expectedResult',label:'Expected Result'},
       {key:'actualResult',label:'Actual Result'},{key:'severity',label:'Severity'},{key:'priority',label:'Priority'},
@@ -718,7 +809,7 @@ const BugReportModule = {
       {key:'environment',label:'Environment'},{key:'browser',label:'Browser'},{key:'os',label:'OS'},
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
-    downloadBlob(arrayToCSV(this.filtered(), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
+    downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b) })), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
     ActivityLog.record('bugreport_export', `${this.filtered().length} bug di-export ke CSV`);
     Toast.show('Export CSV Bug Report berhasil (siap import ke Google Spreadsheet).', 'success');
   },
@@ -737,9 +828,8 @@ const BugReportModule = {
           const title = r['Bug Title'] || r.title;
           const actualResult = r['Actual Result'] || r.actualResult;
           if (!title || !actualResult) return;
-          const id = IdGen.next('BUG');
           App.state.bugs.push({
-            id, testCaseId: r['Test Case ID'] || r.testCaseId || null,
+            id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), testCaseId: r['Test Case ID'] || r.testCaseId || null,
             module: r.Module || r.module || '', scenario: r.Scenario || r.scenario || '',
             expectedResult: r['Expected Result'] || r.expectedResult || '', steps: '',
             tester: r.Tester || r.tester || '', title, description: r.Description || r.description || '',
@@ -823,6 +913,7 @@ const BugReportModule = {
   },
 
   bindStaticEvents(){
+    bindPageSize('bugPageSize', this);
     document.getElementById('bugBackToFilesBtn').addEventListener('click', () => this.backToFiles());
     document.getElementById('bugNewFileBtn').addEventListener('click', async () => {
       if (Auth.isAdmin()){

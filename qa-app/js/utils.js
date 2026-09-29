@@ -29,7 +29,9 @@ const STORAGE_KEYS = {
    localStorage immediately (so data survives a reload even with the
    server off) and fires the same write to MySQL in the background
    best-effort. */
-const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+// Local = localhost/127.0.0.1, or index.html opened straight from disk (file://,
+// empty hostname) — never let a local session write into the production DB.
+const API_BASE = ['localhost', '127.0.0.1', ''].includes(location.hostname)
   ? 'http://localhost:3001/api'
   : 'https://bugrail-api-production.up.railway.app/api';
 
@@ -85,7 +87,35 @@ const Storage = {
 };
 
 /* ---------- Auto-increment ID generator (TC-0001 / BUG-0001) ---------- */
+/* "Tampilkan 10/25/50/100" next to a list's pagination. The module needs
+   ui.page / ui.pageSize and a render() — same shape Test Case, Bug Report
+   and Activity Log already use. */
+function bindPageSize(selectId, module){
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  el.value = String(module.ui.pageSize);
+  el.addEventListener('change', () => {
+    module.ui.pageSize = Number(el.value);
+    module.ui.page = 1;
+    module.render();
+  });
+}
+
+/* Bugs carry two ids: `id` = internal unique key (lookups, delete, selection —
+   never shown) and `code` = the BUG-0001 number people see, counted per
+   workspace, so two workspaces may both have BUG-0001 without colliding. */
+function bugCode(b){ return (b && (b.code || b.id)) || ''; }
+
 const IdGen = {
+  // Per-scope counter: nextFor('BUG', 'WS-1') -> "BUG-0001", independent per workspace.
+  nextFor(prefix, scope){
+    const counters = Storage.get(STORAGE_KEYS.COUNTERS, {});
+    const key = `${prefix}@${scope || 'shared'}`;
+    counters[key] = (counters[key] || 0) + 1;
+    Storage.set(STORAGE_KEYS.COUNTERS, counters);
+    return `${prefix}-${String(counters[key]).padStart(4, '0')}`;
+  },
+  uid(prefix){ return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; },
   next(prefix){
     const counters = Storage.get(STORAGE_KEYS.COUNTERS, {});
     const current = (counters[prefix] || 0) + 1;
@@ -377,6 +407,11 @@ function escapeHtml(str){
   return String(str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* Escape then turn http(s) URLs into clickable links (opens in a new tab). */
+function linkify(str){
+  return escapeHtml(str).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
 
 /* Dev team quality metric: how fast bugs go from reported (Open) to Closed,

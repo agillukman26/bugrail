@@ -7,7 +7,7 @@ const Summary = {
   filters: { fileId:'', module:'', tester:'', dateFrom:'', dateTo:'' },
 
   filteredTC(){
-    return App.state.testcases.filter(t => {
+    return TestCaseModule.all().filter(t => {
       if (this.filters.fileId && t.fileId !== this.filters.fileId) return false;
       if (this.filters.module && t.module !== this.filters.module) return false;
       if (this.filters.dateFrom && t.executionDate && t.executionDate < this.filters.dateFrom) return false;
@@ -16,7 +16,7 @@ const Summary = {
     });
   },
   filteredBugs(){
-    return App.state.bugs.filter(b => {
+    return BugReportModule.all().filter(b => {
       if (this.filters.fileId && b.fileId !== this.filters.fileId) return false;
       if (this.filters.module && b.module !== this.filters.module) return false;
       if (this.filters.tester && b.tester !== this.filters.tester) return false;
@@ -30,7 +30,7 @@ const Summary = {
   /* Bug count per file, ignoring the file filter itself — lets you spot
      which file has the most bug reports regardless of which one is picked. */
   bugCountsByFile(){
-    const base = App.state.bugs.filter(b => {
+    const base = BugReportModule.all().filter(b => {
       if (this.filters.module && b.module !== this.filters.module) return false;
       if (this.filters.tester && b.tester !== this.filters.tester) return false;
       const reportDay = b.reportDate ? b.reportDate.slice(0,10) : '';
@@ -76,13 +76,13 @@ const Summary = {
       el.innerHTML = `<option value="">${el.dataset.label}</option>` +
         values.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
     };
-    build('sumFilterModule', App.state.testcases, 'module');
-    build('sumFilterTester', App.state.bugs, 'tester');
+    build('sumFilterModule', TestCaseModule.all(), 'module');
+    build('sumFilterTester', BugReportModule.all(), 'tester');
 
     const fileEl = document.getElementById('sumFilterFile');
     const curFile = this.filters.fileId;
     fileEl.innerHTML = `<option value="">${fileEl.dataset.label}</option>` +
-      App.state.files.map(f => `<option value="${f.id}" ${f.id===curFile?'selected':''}>${escapeHtml(f.name)}</option>`).join('');
+      Auth.visibleFiles(App.state.files).map(f => `<option value="${f.id}" ${f.id===curFile?'selected':''}>${escapeHtml(f.name)}</option>`).join('');
   },
 
   render(){
@@ -277,7 +277,7 @@ const Summary = {
         recommendations.push('Telusuri root cause pada bug yang di-reopen agar fix berikutnya tidak berulang gagal.');
       }
 
-      const retestRounds = bugs.map(b => ({ id: b.id, title: b.title, count: BugReportModule.reopenCount(b) }))
+      const retestRounds = bugs.map(b => ({ id: bugCode(b), title: b.title, count: BugReportModule.reopenCount(b) }))
         .filter(r => r.count > 0)
         .sort((a,b) => b.count - a.count);
       if (retestRounds.length){

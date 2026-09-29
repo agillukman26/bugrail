@@ -50,7 +50,7 @@ const ActivityLog = {
 };
 
 const ActivityLogModule = {
-  ui: { search: '', filters: { user: '', actionGroup: '' }, page: 1, pageSize: 20 },
+  ui: { search: '', filters: { user: '', actionGroup: '' }, page: 1, pageSize: 25 },
 
   /* Maps an entry's `action` code to the Filter dropdown's group value. */
   actionGroupOf(action){
@@ -62,6 +62,12 @@ const ActivityLogModule = {
     return 'other';
   },
 
+  // Workspace that was active when the action happened (empty = none / admin "Semua workspace").
+  workspaceName(e){
+    if (!e.workspaceId) return '(Semua / Shared)';
+    return (Auth.findWorkspace(e.workspaceId) || {}).name || '(workspace dihapus)';
+  },
+
   all(){ return App.state.activityLog.slice().sort((a, b) => b.ts.localeCompare(a.ts)); },
 
   filtered(){
@@ -70,7 +76,7 @@ const ActivityLogModule = {
       if (filters.user && e.actorEmail !== filters.user) return false;
       if (filters.actionGroup && this.actionGroupOf(e.action) !== filters.actionGroup) return false;
       if (search){
-        const hay = `${e.actorEmail} ${e.label}`.toLowerCase();
+        const hay = `${e.actorEmail} ${this.workspaceName(e)} ${e.label}`.toLowerCase();
         const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
         if (!words.every(w => hay.includes(w))) return false;
       }
@@ -101,6 +107,7 @@ const ActivityLogModule = {
         <td class="text-dim" style="white-space:nowrap;">${formatDateTime(e.ts)}</td>
         <td class="truncate" style="max-width:180px;" title="${escapeHtml(e.actorEmail || '-')}">${escapeHtml(e.actorEmail || '-')}</td>
         <td>${escapeHtml(e.actorRole || '-')}</td>
+        <td class="truncate" style="max-width:160px;" title="${escapeHtml(this.workspaceName(e))}">${escapeHtml(this.workspaceName(e))}</td>
         <td><span class="badge st-notrun">${escapeHtml(e.action)}</span></td>
         <td class="truncate" style="max-width:280px;" title="${escapeHtml(e.label)}">${escapeHtml(e.label)}</td>
       </tr>
@@ -126,7 +133,7 @@ const ActivityLogModule = {
         ${field('Waktu', formatDateTime(entry.ts))}
         ${field('User', escapeHtml(entry.actorEmail || '-'))}
         ${field('Role', escapeHtml(entry.actorRole || '-'))}
-        ${field('Workspace', escapeHtml((Auth.findWorkspace(entry.workspaceId) || {}).name || '(Semua / Shared)'))}
+        ${field('Workspace', escapeHtml(this.workspaceName(entry)))}
         ${field('Jenis Aksi', `<span class="badge st-notrun">${escapeHtml(entry.action)}</span>`)}
         ${field('Detail', escapeHtml(entry.label))}
       </div>`;
@@ -173,6 +180,7 @@ const ActivityLogModule = {
       { key: 'ts', label: 'Waktu', width: 20 },
       { key: 'actorEmail', label: 'User', width: 26 },
       { key: 'actorRole', label: 'Role', width: 16 },
+      { key: 'workspace', label: 'Workspace', width: 20 },
       { key: 'action', label: 'Aksi', width: 20 },
       { key: 'label', label: 'Detail', width: 44 }
     ];
@@ -180,7 +188,7 @@ const ActivityLogModule = {
 
   async exportExcel(){
     const cols = this.exportColumns();
-    const rows = this.filtered().map(e => ({ ...e, ts: formatDateTime(e.ts) }));
+    const rows = this.filtered().map(e => ({ ...e, ts: formatDateTime(e.ts), workspace: this.workspaceName(e) }));
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Activity Log');
@@ -209,12 +217,13 @@ const ActivityLogModule = {
 
   exportCSV(){
     const cols = this.exportColumns();
-    const rows = this.filtered().map(e => ({ ...e, ts: formatDateTime(e.ts) }));
+    const rows = this.filtered().map(e => ({ ...e, ts: formatDateTime(e.ts), workspace: this.workspaceName(e) }));
     downloadBlob(arrayToCSV(rows, cols), `ActivityLog_${todayISO()}.csv`, 'text/csv');
     Toast.show('Export CSV Activity Log berhasil.', 'success');
   },
 
   bindStaticEvents(){
+    bindPageSize('alPageSize', this);
     document.getElementById('alSearchInput').addEventListener('input', debounce(e => {
       this.ui.search = e.target.value; this.ui.page = 1; this.render();
     }, 200));

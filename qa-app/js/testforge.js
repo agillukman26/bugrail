@@ -247,6 +247,7 @@ const TestForgeModule = {
         executionDate: '',
         customFields: {},
         fileId,
+        createdBy: Auth.currentEmail() || '',
         createdAt: nowISO()
       });
     });

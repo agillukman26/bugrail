@@ -16,7 +16,10 @@ const UserManagementModule = {
 
   countAdmins(users){ return users.filter(u => u.role === 'admin').length; },
   roleLabel(value){ return (Auth.ROLES.find(r => r.value === value) || {}).label || value; },
-  workspaceLabel(id){ return id ? ((Auth.findWorkspace(id) || {}).name || '-') : '(Semua / Shared)'; },
+  workspaceLabel(user){
+    const names = WorkspaceCalc.userWorkspaceIds(user).map(id => (Auth.findWorkspace(id) || {}).name || '-');
+    return names.length ? names.join(', ') : '(Semua / Shared)';
+  },
 
   renderUsers(){
     const users = App.state.settings.users || [];
@@ -26,7 +29,7 @@ const UserManagementModule = {
       <tr>
         <td>${escapeHtml(u.email)}</td>
         <td>${escapeHtml(this.roleLabel(u.role))}</td>
-        <td>${escapeHtml(this.workspaceLabel(u.workspaceId))}</td>
+        <td>${escapeHtml(this.workspaceLabel(u))}</td>
         <td>${actionMenu(`
           <button data-edit-user="${escapeHtml(u.email)}">✎ Edit</button>
           <button class="danger" data-del-user="${escapeHtml(u.email)}">🗑 Hapus</button>
@@ -66,8 +69,7 @@ const UserManagementModule = {
     pwInput.value = '';
     pwInput.placeholder = 'Kosongkan jika tidak diubah';
     document.getElementById('settUserRole').value = user.role;
-    this.refreshWorkspaceSelect();
-    document.getElementById('settUserWorkspace').value = user.workspaceId || '';
+    this.refreshWorkspaceSelect(WorkspaceCalc.userWorkspaceIds(user));
     document.getElementById('settUserSaveBtn').textContent = 'Simpan Perubahan';
     this.openUserModal();
   },
@@ -82,7 +84,7 @@ const UserManagementModule = {
     pwInput.value = '';
     pwInput.placeholder = 'Min 4 karakter';
     document.getElementById('settUserRole').value = 'user';
-    document.getElementById('settUserWorkspace').value = '';
+    this.refreshWorkspaceSelect([]);
     document.getElementById('settUserSaveBtn').textContent = 'Simpan';
   },
 
@@ -92,7 +94,7 @@ const UserManagementModule = {
     const email = Auth.normalizeEmail(emailInput.value);
     const password = document.getElementById('settUserPassword').value;
     const role = document.getElementById('settUserRole').value;
-    const workspaceId = document.getElementById('settUserWorkspace').value || null;
+    const workspaceIds = [...document.querySelectorAll('#settUserWorkspaces input:checked')].map(cb => cb.value);
 
     if (this.editingEmail){
       const user = Auth.findByEmail(users, this.editingEmail);
@@ -105,7 +107,11 @@ const UserManagementModule = {
         user.password = password;
       }
       user.role = role;
-      user.workspaceId = workspaceId;
+      user.workspaceIds = workspaceIds;
+      // Keep the legacy single field too: older app versions still sharing this
+      // database only read workspaceId — without it they treat the user as
+      // workspace-less and create shared files visible in every workspace.
+      user.workspaceId = workspaceIds[0] || null;
       App.saveSettings();
       ActivityLog.record('user_update', `User ${email} diperbarui`);
       this.resetUserForm();
@@ -119,7 +125,7 @@ const UserManagementModule = {
     if (Auth.findByEmail(users, email)){ Toast.show('Email sudah terdaftar.', 'error'); return; }
     if (password.length < 4){ Toast.show('Password minimal 4 karakter.', 'error'); return; }
 
-    users.push({ email, password, role, workspaceId });
+    users.push({ email, password, role, workspaceIds, workspaceId: workspaceIds[0] || null }); // workspaceId: see note above
     App.saveSettings();
     ActivityLog.record('user_create', `User ${email} dibuat`);
     this.resetUserForm();
@@ -188,7 +194,7 @@ const UserManagementModule = {
   roleEditingValue: null,
   /* Menu groups for the permission checklist: keyed by the permission key's prefix. */
   PERM_GROUPS: [
-    { title: 'Umum', match: k => k === 'dashboard' || k === 'summary' },
+    { title: 'Umum', match: k => k === 'dashboard' || k === 'summary' || k === 'report' },
     { title: 'Test Case', match: k => k.startsWith('testcase_') },
     { title: 'Bug Report', match: k => k.startsWith('bugreport_') },
     { title: 'Administrasi', match: k => k === 'master' || k === 'usermanagement' || k === 'settings' }
@@ -303,9 +309,11 @@ const UserManagementModule = {
   /* ---- Workspace management (settings.workspaces) ---- */
   workspaceEditingId: null,
 
-  refreshWorkspaceSelect(){
-    document.getElementById('settUserWorkspace').innerHTML = '<option value="">(Semua / Shared)</option>' +
-      Auth.workspaces().map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
+  refreshWorkspaceSelect(checkedIds = []){
+    const ws = Auth.workspaces();
+    document.getElementById('settUserWorkspaces').innerHTML = ws.length
+      ? ws.map(w => `<label><input type="checkbox" value="${escapeHtml(w.id)}" ${checkedIds.includes(w.id) ? 'checked' : ''}> ${escapeHtml(w.name)}</label>`).join('')
+      : '<span class="text-faint" style="font-size:12.5px;">Belum ada workspace.</span>';
   },
 
   renderWorkspaces(){
@@ -320,7 +328,7 @@ const UserManagementModule = {
     body.innerHTML = workspaces.length ? workspaces.map(w => `
       <tr>
         <td>${escapeHtml(w.name)}</td>
-        <td>${users.filter(u => u.workspaceId === w.id).length}</td>
+        <td>${users.filter(u => WorkspaceCalc.userWorkspaceIds(u).includes(w.id)).length}</td>
         <td>${files.filter(f => f.workspaceId === w.id).length}</td>
         <td>${actionMenu(`
           <button data-ws-edit="${w.id}">✎ Edit</button>

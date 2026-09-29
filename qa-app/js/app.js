@@ -29,7 +29,6 @@ const App = {
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
     IdGen.syncAllFromExisting(this.state.testcases.map(t => t.id));
-    IdGen.syncFromExisting('BUG', this.state.bugs.map(b => b.id));
   },
   /* Merge default permissions into settings so newly-added permission keys
      show up on the matrix, without clobbering an admin's saved overrides. */
@@ -60,6 +59,17 @@ const App = {
     this.saveTestcases();
     this.saveBugs();
   },
+  /* Test Case and Bug Report share one file list — deleting a file from
+     either page removes its test cases AND its bugs, so nothing is left
+     orphaned (invisible in the file list but still counted everywhere). */
+  deleteFileCascade(fileId){
+    this.state.files = this.state.files.filter(f => f.id !== fileId);
+    this.state.testcases = this.state.testcases.filter(t => t.fileId !== fileId);
+    this.state.bugs = this.state.bugs.filter(b => b.fileId !== fileId);
+    this.saveFiles();
+    this.saveTestcases();
+    this.saveBugs();
+  },
   saveTestcases(){ Storage.set(STORAGE_KEYS.TESTCASES, this.state.testcases); this.onDataChanged(); },
   saveBugs(){ Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); },
   saveFiles(){ Storage.set(STORAGE_KEYS.FILES, this.state.files); },
@@ -70,6 +80,7 @@ const App = {
      dashboard/summary views in sync (simple pub/sub substitute). */
   onDataChanged(){
     this.renderSidebarCounts();
+    NotificationCenter.renderBadge();
     if (this.state.currentPage === 'dashboard') Dashboard.render();
     if (this.state.currentPage === 'summary') Summary.render();
   },
@@ -77,7 +88,6 @@ const App = {
   /* ---- Routing (simple show/hide, no history API needed offline) ---- */
   goTo(page){
     this.state.currentPage = page;
-    sessionStorage.setItem(this.LAST_PAGE_KEY, page);
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
     const pageEl = document.getElementById(`page-${page}`);
@@ -100,6 +110,7 @@ const App = {
       testcase: ['Test Case', 'Kelola skenario pengujian'],
       bugreport: ['Bug Report', 'Laporan bug terintegrasi dengan Test Case'],
       summary: ['Summary', 'Rekap progres testing & bug'],
+      report: ['Report', 'Analisa kesiapan go-live untuk PM & BA'],
       importexport: ['Import & Export', 'Import Test Case, export data, backup & restore'],
       usermanagement: ['User Management', 'Kelola akun login (Admin & User)'],
       rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
@@ -116,6 +127,7 @@ const App = {
     if (page === 'testcase') TestCaseModule.render();
     if (page === 'bugreport') BugReportModule.render();
     if (page === 'summary') Summary.render();
+    if (page === 'report') ReportModule.render();
     if (page === 'masterstatus') MasterStatusModule.render();
     if (page === 'activitylog') ActivityLogModule.render();
 
@@ -131,6 +143,7 @@ const App = {
     };
     setVisible('dashboard', Auth.can('dashboard'));
     setVisible('summary', Auth.can('summary'));
+    setVisible('report', Auth.can('report'));
     setVisible('testcase', Auth.can('testcase_read'));
     setVisible('bugreport', Auth.can('bugreport_read'));
     setVisible('masterstatus', Auth.can('master'));
@@ -154,6 +167,31 @@ const App = {
     if (bugCountEl) bugCountEl.textContent = bugOpen;
   },
 
+  /* Global search suggestions across Test Case + Bug Report (only what the
+     role may read, same visibility rules as each module's list). */
+  renderSearchResults(term){
+    const el = document.getElementById('globalSearchResults');
+    const q = term.toLowerCase();
+    if (!q){ el.classList.remove('open'); el.innerHTML = ''; return; }
+    const LIMIT = 6;
+    const hit = (...fields) => fields.some(f => String(f || '').toLowerCase().includes(q));
+    const tcs = Auth.can('testcase_read')
+      ? TestCaseModule.all().filter(t => hit(t.id, t.scenario, t.testCase, t.module)) : [];
+    const bugs = Auth.can('bugreport_read')
+      ? BugReportModule.all().filter(b => hit(bugCode(b), b.title, b.module, b.description)) : [];
+    const group = (title, list, type, label) => list.length ? `
+      <div class="gs-group">${title} <span>${list.length > LIMIT ? `${LIMIT} dari ${list.length}` : list.length}</span></div>
+      ${list.slice(0, LIMIT).map(x => `
+        <div class="gs-item" role="option" data-type="${type}" data-id="${escapeHtml(x.id)}">
+          <span class="mono">${escapeHtml(type === 'bug' ? bugCode(x) : x.id)}</span>
+          <span class="gs-title">${escapeHtml(label(x))}</span>
+          <span class="gs-meta">${escapeHtml(x.module || '')} · ${escapeHtml(x.status || '')}</span>
+        </div>`).join('')}` : '';
+    el.innerHTML = (group('Test Case', tcs, 'tc', t => t.scenario || t.testCase) + group('Bug Report', bugs, 'bug', b => b.title))
+      || `<div class="gs-empty">Tidak ada hasil untuk "${escapeHtml(term)}"</div>`;
+    el.classList.add('open');
+  },
+
   /* ---- Theme ---- */
   applyTheme(){
     document.documentElement.setAttribute('data-theme', this.state.settings.theme);
@@ -173,15 +211,33 @@ const App = {
     this.loadAll();
     this.applyTheme();
     this.renderSidebarCounts();
+    NotificationCenter.renderBadge();
+    WorkspacePicker.renderSwitcher();
     this.applyNavPermissions();
 
     const closeSidebar = () => {
       document.getElementById('sidebar').classList.remove('open');
       document.getElementById('sidebarBackdrop').classList.remove('open');
     };
+    // Desktop: minimize to an icon rail (remembered per browser). Mobile: slide-in drawer.
+    const setCollapsed = on => {
+      document.body.classList.toggle('sidebar-collapsed', on);
+      try{ localStorage.setItem('qa_sidebar_collapsed', on ? '1' : '0'); }catch(e){}
+    };
+    let saved = false;
+    try{ saved = localStorage.getItem('qa_sidebar_collapsed') === '1'; }catch(e){}
+    document.body.classList.toggle('sidebar-collapsed', saved);
     document.querySelectorAll('.nav-item').forEach(item => {
       if (item.classList.contains('nav-group-toggle')){
-        item.addEventListener('click', () => item.closest('.nav-group').classList.toggle('open'));
+        item.addEventListener('click', () => {
+          // Submenus are hidden in the icon rail, so expand the sidebar to show them.
+          if (document.body.classList.contains('sidebar-collapsed')){
+            setCollapsed(false);
+            item.closest('.nav-group').classList.add('open');
+            return;
+          }
+          item.closest('.nav-group').classList.toggle('open');
+        });
         return;
       }
       item.addEventListener('click', () => { this.goTo(item.dataset.page); closeSidebar(); });
@@ -190,7 +246,12 @@ const App = {
       item.addEventListener('click', () => { this.goTo(item.dataset.page); closeSidebar(); });
     });
     document.getElementById('themeToggleBtn').addEventListener('click', () => this.toggleTheme());
+    document.querySelectorAll('.nav-item').forEach(item => {
+      const label = item.querySelector('.nav-label');
+      if (label) item.title = label.textContent.trim();
+    });
     document.getElementById('hamburgerBtn').addEventListener('click', () => {
+      if (window.innerWidth > 1024) return setCollapsed(!document.body.classList.contains('sidebar-collapsed'));
       document.getElementById('sidebar').classList.toggle('open');
       document.getElementById('sidebarBackdrop').classList.toggle('open');
     });
@@ -214,11 +275,50 @@ const App = {
 
     // Global realtime search (topbar) — routes to whichever module owns the current page.
     const globalSearch = document.getElementById('globalSearch');
-    globalSearch.addEventListener('input', debounce(e => {
-      const term = e.target.value.trim();
+    // Typing only shows the suggestion list — nothing navigates or filters until
+    // the user picks: click / arrow + Enter opens that item; Enter with nothing
+    // highlighted filters the table on the Test Case / Bug Report page.
+    const applyTableFilter = term => {
       if (this.state.currentPage === 'testcase') TestCaseModule.setSearch(term);
       if (this.state.currentPage === 'bugreport') BugReportModule.setSearch(term);
+    };
+    globalSearch.addEventListener('input', debounce(e => {
+      const term = e.target.value.trim();
+      if (!term) applyTableFilter(''); // clearing the box resets the table filter
+      this.renderSearchResults(term);
     }, 200));
+    const resultsEl = document.getElementById('globalSearchResults');
+    globalSearch.addEventListener('keydown', e => {
+      const items = [...resultsEl.querySelectorAll('.gs-item')];
+      const cur = items.findIndex(i => i.classList.contains('active'));
+      if (e.key === 'Enter' && cur < 0){
+        e.preventDefault();
+        applyTableFilter(globalSearch.value.trim());
+        resultsEl.classList.remove('open');
+        return;
+      }
+      if (!items.length) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        const next = e.key === 'ArrowDown' ? Math.min(cur + 1, items.length - 1) : Math.max(cur - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === next));
+        items[next].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter'){
+        e.preventDefault();
+        items[cur].click();
+      } else if (e.key === 'Escape'){
+        resultsEl.classList.remove('open');
+      }
+    });
+    globalSearch.addEventListener('focus', () => this.renderSearchResults(globalSearch.value.trim()));
+    resultsEl.addEventListener('click', e => {
+      const item = e.target.closest('.gs-item');
+      if (!item) return;
+      resultsEl.classList.remove('open');
+      if (item.dataset.type === 'tc') TestCaseModule.openDetail(item.dataset.id);
+      else BugReportModule.openDetail(item.dataset.id);
+    });
+    document.addEventListener('click', e => { if (!e.target.closest('.topbar-search')) resultsEl.classList.remove('open'); });
 
     // Keyboard shortcuts: N = new item on current page, Ctrl/Cmd+S = manual "save" toast (data is autosaved).
     document.addEventListener('keydown', e => {
@@ -240,13 +340,14 @@ const App = {
       }
     });
 
-    this.goTo(this.restorePage());
+    this.goTo(this.firstAllowedPage());
+    window.addEventListener('hashchange', () => this.openDeepLink());
   },
 
   /* Pages gated purely by Auth.can(); rolepermission/workspace (admin-only)
      and importexport (no gate) are checked separately in canAccessPage(). */
   PAGE_PERMISSIONS: {
-    dashboard: 'dashboard', summary: 'summary', testcase: 'testcase_read',
+    dashboard: 'dashboard', summary: 'summary', report: 'report', testcase: 'testcase_read',
     bugreport: 'bugreport_read', masterstatus: 'master', usermanagement: 'usermanagement', settings: 'settings',
     activitylog: 'activitylog'
   },
@@ -256,17 +357,85 @@ const App = {
     const perm = this.PAGE_PERMISSIONS[page];
     return perm ? Auth.can(perm) : false;
   },
+  /* Active workspace switched in-app (workspace.js): drop anything that belonged
+     to the previous workspace — open file, search, filters, selections — then
+     recompute every workspace-scoped view. */
+  onWorkspaceChanged(){
+    [TestCaseModule, BugReportModule].forEach(m => {
+      m.ui.activeFileId = null; m.ui.search = ''; m.ui.page = 1; m.ui.selected.clear();
+    });
+    Summary.filters.fileId = '';
+    ReportModule.filters.fileId = '';
+    const gs = document.getElementById('globalSearch');
+    if (gs) gs.value = '';
+    this.renderSidebarCounts();
+    NotificationCenter.renderBadge();
+    WorkspacePicker.renderSwitcher();
+    this.goTo(this.state.currentPage || this.firstAllowedPage());
+  },
+
+  /* ---- Shared bug links: <app url>#bug=<internal id> ---- */
+  bugLink(bug){
+    const base = location.href.split('#')[0];
+    return `${base}#bug=${encodeURIComponent(bug.id)}`;
+  },
+  deepLinkBugId(){
+    const m = location.hash.match(/^#bug=(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+  },
+  /* Opens the bug from the URL hash (after login + workspace resolution, or
+     when a link is pasted into an already-open tab). Switches to the bug's
+     workspace when needed. Returns true if a link was handled. */
+  openDeepLink(){
+    const id = this.deepLinkBugId();
+    if (!id) return false;
+    history.replaceState(null, '', location.href.split('#')[0]); // consume: reload won't reopen it
+    const bug = this.state.bugs.find(b => b.id === id);
+    if (!bug){ Toast.show('Bug dari link tidak ditemukan atau sudah dihapus.', 'error'); return true; }
+    const file = this.state.files.find(f => f.id === bug.fileId);
+    const target = Auth.can('bugreport_read')
+      ? WorkspaceCalc.workspaceForFile(file, WorkspacePicker.myWorkspaceIds(), Auth.isAdmin(), WorkspacePicker.activeRaw())
+      : null;
+    if (target === null){ Toast.show('Anda tidak punya akses ke bug ini.', 'error'); return true; }
+    if (target && target !== WorkspacePicker.activeRaw()){
+      WorkspacePicker.setActive(target);
+      this.onWorkspaceChanged();
+    }
+    this.goTo('bugreport');
+    if (bug.fileId) BugReportModule.openFile(bug.fileId);
+    BugReportModule.openDetail(bug.id);
+    return true;
+  },
+
+  /* ⓘ on a file card (Test Case & Bug Report): who made it, when, and what's in it. */
+  showFileDetail(fileId){
+    const file = this.state.files.find(f => f.id === fileId);
+    if (!file) return;
+    const tcCount = this.state.testcases.filter(t => t.fileId === fileId).length;
+    const bugCount = this.state.bugs.filter(b => b.fileId === fileId).length;
+    const ws = id => (Auth.findWorkspace(id) || { name: id || '-' }).name;
+    const shared = (file.sharedWith || []).map(ws).join(', ');
+    const row = (label, value) => `<div class="file-detail-row"><span>${label}</span><b>${value}</b></div>`;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal status-change-modal active';
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2 style="margin:0 0 14px; font-size:17px;">📁 ${escapeHtml(file.name)}</h2>
+        ${row('Dibuat oleh', escapeHtml(file.createdBy || '(tidak tercatat)'))}
+        ${row('Dibuat pada', file.createdAt ? formatDateTime(file.createdAt) : '-')}
+        ${row('Workspace', escapeHtml(ws(file.workspaceId)))}
+        ${shared ? row('Dibagikan ke', escapeHtml(shared)) : ''}
+        ${row('Jumlah test case', tcCount)}
+        ${row('Jumlah bug', bugCount)}
+        <div class="modal-footer"><button class="btn primary" id="fileDetailClose">Tutup</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#fileDetailClose').onclick = () => overlay.remove();
+    bindBackdropClose(overlay, () => overlay.remove());
+  },
   firstAllowedPage(){
     const order = ['dashboard','summary','testcase','bugreport'];
     return order.find(p => this.canAccessPage(p)) || 'dashboard';
-  },
-  /* Reload lands back on whatever page the user had open (see goTo's
-     sessionStorage write below), falling back to the first allowed page
-     if that page no longer exists or the role can't access it anymore. */
-  LAST_PAGE_KEY: 'qa_last_page',
-  restorePage(){
-    const saved = sessionStorage.getItem(this.LAST_PAGE_KEY);
-    return (saved && document.getElementById(`page-${saved}`) && this.canAccessPage(saved)) ? saved : this.firstAllowedPage();
   }
 };
 

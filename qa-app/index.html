@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QA Test Management &amp; Bug Tracking</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐞</text></svg>">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=23">
 <!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
      Core app + data storage still work fully offline once these have loaded once. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -80,35 +80,37 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <div class="mark">QA</div>
-      <div>
+      <div class="brand-text">
         <div class="name">BugRail</div>
         <div class="sub">Test &amp; Bug Suite</div>
       </div>
     </div>
+    <div class="ws-switcher" id="wsSwitcher"></div>
     <nav class="nav">
-      <div class="nav-item" data-page="dashboard"><span class="icon">▦</span> Dashboard</div>
-      <div class="nav-item" data-page="testcase"><span class="icon">☑</span> Test Case </div>
-      <div class="nav-item" data-page="bugreport"><span class="icon">🐞</span> Bug Report</div>
-      <div class="nav-item" data-page="summary"><span class="icon">📊</span> Summary</div>
+      <div class="nav-item" data-page="dashboard"><span class="icon">▦</span><span class="nav-label">Dashboard</span></div>
+      <div class="nav-item" data-page="testcase"><span class="icon">☑</span><span class="nav-label">Test Case</span></div>
+      <div class="nav-item" data-page="bugreport"><span class="icon">🐞</span><span class="nav-label">Bug Report</span></div>
+      <div class="nav-item" data-page="summary"><span class="icon">📊</span><span class="nav-label">Summary</span></div>
+      <div class="nav-item" data-page="report"><span class="icon">🚦</span><span class="nav-label">Report</span></div>
       <!-- <div class="nav-item" data-page="importexport"><span class="icon">⇅</span> Import &amp; Export</div> -->
       <div class="nav-group" id="navGroupMaster">
-        <div class="nav-item nav-group-toggle"><span class="icon">🗂</span> Master <span class="arrow">▾</span></div>
+        <div class="nav-item nav-group-toggle"><span class="icon">🗂</span><span class="nav-label">Master</span> <span class="arrow">▾</span></div>
         <div class="nav-subitem" data-page="masterstatus">Status Bug Report</div>
         <div class="nav-subitem" data-page="workspace">Workspace</div>
       </div>
       <div class="nav-group" id="navGroupUserManagement" style="display:none;">
-        <div class="nav-item nav-group-toggle"><span class="icon">👤</span> User Management <span class="arrow">▾</span></div>
+        <div class="nav-item nav-group-toggle"><span class="icon">👤</span><span class="nav-label">User Management</span> <span class="arrow">▾</span></div>
         <div class="nav-subitem" data-page="usermanagement">Daftar User</div>
         <div class="nav-subitem" data-page="rolepermission">Role Permission</div>
       </div>
-      <div class="nav-item" data-page="settings"><span class="icon">⚙</span> Settings</div>
-      <div class="nav-item" data-page="activitylog"><span class="icon">🕒</span> Activity Log</div>
+      <div class="nav-item" data-page="settings"><span class="icon">⚙</span><span class="nav-label">Settings</span></div>
+      <div class="nav-item" data-page="activitylog"><span class="icon">🕒</span><span class="nav-label">Activity Log</span></div>
     </nav>
     <div class="sidebar-footer">
       <div class="auth-badge" id="authBadge"></div>
       <div class="theme-toggle" id="themeToggleBtn">
-        <span><span id="themeIcon">☀️</span> <span id="themeLabel">Light Mode</span></span>
-        <span>⇄</span>
+        <span><span id="themeIcon">☀️</span> <span id="themeLabel" class="nav-label">Light Mode</span></span>
+        <span class="nav-label">⇄</span>
       </div>
     </div>
   </aside>
@@ -116,14 +118,22 @@
   <!-- ============ MAIN ============ -->
   <div class="main">
     <header class="topbar">
-      <button class="hamburger" id="hamburgerBtn">☰</button>
+      <button class="hamburger" id="hamburgerBtn" title="Minimize / expand sidebar" aria-label="Toggle sidebar">☰</button>
       <div>
         <div class="page-title" id="pageTitle">Dashboard</div>
         <div class="page-sub" id="pageSub">Ringkasan status pengujian &amp; bug secara realtime</div>
       </div>
       <div class="topbar-search">
         <span>🔎</span>
-        <input type="text" id="globalSearch" placeholder="Cari (tekan / untuk fokus)...">
+        <input type="text" id="globalSearch" autocomplete="off" placeholder="Cari (tekan / untuk fokus)...">
+        <div class="gs-results" id="globalSearchResults" role="listbox"></div>
+      </div>
+      <div class="notif-wrap">
+        <button class="notif-btn" id="notifBtn" type="button" title="Notifikasi" aria-label="Notifikasi">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
+        </button>
+        <div class="gs-results notif-panel" id="notifPanel"></div>
       </div>
     </header>
 
@@ -148,7 +158,7 @@
 
         <div id="tcFileDetailView" style="display:none;">
         <div class="toolbar">
-          <button class="btn sm ghost" id="tcBackToFilesBtn">‹ Semua File</button>
+          <button class="btn sm ghost btn-back" id="tcBackToFilesBtn" title="Kembali ke daftar file" aria-label="Kembali ke daftar file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
           <b id="tcActiveFileName" style="margin-right:8px;"></b>
           <span class="text-faint" id="tcActiveFileHint" style="font-size:12px;"></span>
         </div>
@@ -211,6 +221,7 @@
                 <th class="sortable" data-key="testCase">Test Case <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
+                <th class="sortable" data-key="evidence">Evidence <span class="arrow">↕</span></th>
                 <th class="sortable col-hidden" data-key="executionDate">Tgl Eksekusi <span class="arrow">↕</span></th>
                 <th>Aksi</th>
               </tr>
@@ -225,7 +236,7 @@
         </div>
         <div class="flex-between">
           <span class="text-faint" id="tcResultInfo" style="font-size:12.5px;"></span>
-          <div class="pagination" id="tcPagination"></div>
+          <div class="pager-right"><label class="page-size"><span class="page-size-label">Tampilkan</span><select id="tcPageSize" aria-label="Jumlah baris per halaman"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><div class="pagination" id="tcPagination"></div></div>
         </div>
         </div>
       </section>
@@ -243,7 +254,7 @@
 
         <div id="bugFileDetailView" style="display:none;">
         <div class="toolbar">
-          <button class="btn sm ghost" id="bugBackToFilesBtn">‹ Semua File</button>
+          <button class="btn sm ghost btn-back" id="bugBackToFilesBtn" title="Kembali ke daftar file" aria-label="Kembali ke daftar file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
           <b id="bugActiveFileName" style="margin-right:8px;"></b>
           <span class="text-faint" id="bugActiveFileHint" style="font-size:12px;"></span>
         </div>
@@ -270,7 +281,7 @@
               </div>
               <div class="filter-field"><label>Status</label>
                 <select class="filter-select" id="bugFilterStatus" data-label="Semua Status">
-                  <option value="">Semua Status</option><option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option>
+                  <option value="">Semua Status</option>
                 </select>
               </div>
               <div class="filter-field"><label>Tester</label><select class="filter-select" id="bugFilterTester" data-label="Semua Tester"></select></div>
@@ -296,7 +307,6 @@
           <span><span class="count">0</span> item terpilih</span>
           <select class="filter-select" id="bugBulkStatusSelect">
             <option value="">Ubah status ke...</option>
-            <option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option>
           </select>
           <button class="btn sm danger" id="bugBulkDeleteBtn">🗑 Hapus Terpilih</button>
         </div>
@@ -327,7 +337,7 @@
         </div>
         <div class="flex-between" id="bugTableFooter">
           <span class="text-faint" id="bugResultInfo" style="font-size:12.5px;"></span>
-          <div class="pagination" id="bugPagination"></div>
+          <div class="pager-right"><label class="page-size"><span class="page-size-label">Tampilkan</span><select id="bugPageSize" aria-label="Jumlah baris per halaman"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><div class="pagination" id="bugPagination"></div></div>
         </div>
 
         <div class="board-wrap" id="bugBoardWrap" style="display:none;"></div>
@@ -335,6 +345,17 @@
       </section>
 
       <!-- ============ SUMMARY ============ -->
+      <!-- ============ REPORT (Go-Live readiness) ============ -->
+      <section class="page" id="page-report">
+        <div class="toolbar">
+          <select class="filter-select" id="rptFilterFile"></select>
+          <select class="filter-select" id="rptFilterModule"></select>
+          <div class="spacer"></div>
+          <button class="btn primary sm" id="rptExportPdfBtn">⬇ Export PDF</button>
+        </div>
+        <div id="rptBody"></div>
+      </section>
+
       <section class="page" id="page-summary">
         <div class="toolbar">
           <select class="filter-select" id="sumFilterFile" data-label="Semua File"></select>
@@ -355,7 +376,7 @@
         <div class="section-label">Import</div>
         <div class="card" style="margin-bottom:16px;">
           <div class="card-head"><h3>Import Test Case</h3><span class="hint">Format: .xlsx atau .csv</span></div>
-          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result</b>. Test Case ID boleh dikosongkan — sistem akan generate otomatis (prefix 3 huruf dari Module).</p>
+          <p class="text-dim" style="font-size:13px;">Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Test Case ID boleh dikosongkan — sistem akan generate otomatis (prefix 3 huruf dari Module).</p>
           <div class="dropzone" id="importDropzone">
             <div style="font-size:28px;">⇩</div>
             <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
@@ -532,6 +553,7 @@
                 <th>Waktu</th>
                 <th>User</th>
                 <th>Role</th>
+                <th>Workspace</th>
                 <th>Aksi</th>
                 <th>Detail</th>
               </tr>
@@ -545,7 +567,7 @@
         </div>
         <div class="flex-between">
           <span class="text-faint" id="alResultInfo" style="font-size:12.5px;"></span>
-          <div class="pagination" id="alPagination"></div>
+          <div class="pager-right"><label class="page-size"><span class="page-size-label">Tampilkan</span><select id="alPageSize" aria-label="Jumlah baris per halaman"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label><div class="pagination" id="alPagination"></div></div>
         </div>
       </section>
 
@@ -626,8 +648,9 @@
         </div>
       </div>
       <div class="field"><label>Expected Result</label><textarea name="expectedResult"></textarea></div>
+      <div class="field"><label>Actual Result</label><textarea name="actualResult"></textarea></div>
       <div class="form-row">
-        <div class="field"><label>Actual Result</label><textarea name="actualResult"></textarea></div>
+        <div class="field"><label>Evidence</label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti"></textarea></div>
         <div class="field"><label>Execution Date</label><input type="date" name="executionDate"></div>
       </div>
       <div id="tcCustomFieldsWrap"></div>
@@ -657,7 +680,7 @@
       <h2>Import Test Case</h2>
       <button class="close-x" data-close="tcImportModalOverlay">✕</button>
     </div>
-    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result</b>. Test Case ID boleh dikosongkan.</p>
+    <p class="text-dim" style="font-size:13px;">Format: .xlsx atau .csv. Kolom yang didukung: <b>Test Case ID, Module, Role User, Scenario, Pre Kondisi, Test Step, Test Data, Type Test, Expected Result, Evidence</b>. Test Case ID boleh dikosongkan.</p>
     <div class="dropzone" id="tcImportDropzone">
       <div style="font-size:28px;">⇩</div>
       <div><b>Drag &amp; drop</b> file di sini, atau klik untuk memilih file</div>
@@ -720,6 +743,7 @@
     <div class="divider"></div>
     <form id="runForm">
       <div class="field"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult" required></textarea></div>
+      <div class="field"><label>Evidence</label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti"></textarea></div>
       <div class="field"><label>Status <span class="req">*</span></label>
         <select name="status" required><option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option></select>
       </div>
@@ -849,8 +873,11 @@
           <select name="priority"><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
         </div>
       </div>
-      <div class="field"><label>Status</label>
-        <select name="status"><option>Open</option><option>Assigned</option><option>In Progress</option><option>Ready To Test</option><option>Reopened</option><option>Closed</option></select>
+      <div class="form-row">
+        <div class="field"><label>Status</label>
+          <select name="status"></select>
+        </div>
+        <div class="field"><label>Assign ke</label><select name="assignee"></select></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Environment</label>
@@ -882,7 +909,10 @@
   <div class="modal lg">
     <div class="modal-header">
       <h2 id="bugDetailTitle">Detail Bug Report</h2>
-      <button class="close-x" data-close="bugDetailModalOverlay">✕</button>
+      <div class="modal-header-actions">
+        <button class="btn sm" id="bugCopyLinkBtn" type="button" title="Salin link bug ini untuk dikirim ke developer">🔗 Salin link</button>
+        <button class="close-x" data-close="bugDetailModalOverlay">✕</button>
+      </div>
     </div>
     <div id="bugDetailBody" class="bug-detail-body"></div>
 
@@ -954,8 +984,8 @@
     <div class="field"><label>Role</label>
       <select id="settUserRole"></select>
     </div>
-    <div class="field"><label>Workspace</label>
-      <select id="settUserWorkspace"><option value="">(Semua / Shared)</option></select>
+    <div class="field"><label>Workspace <span class="text-faint">(boleh lebih dari satu; kosong = hanya file shared)</span></label>
+      <div class="ws-checklist" id="settUserWorkspaces"></div>
     </div>
     <div class="modal-footer">
       <button type="button" class="btn" data-close="userFormModalOverlay">Batal</button>
@@ -967,20 +997,23 @@
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
 
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=25"></script>
-<script src="js/app.js?v=18"></script>
-<script src="js/activitylog.js?v=5"></script>
-<script src="js/auth.js?v=18"></script>
-<script src="js/dashboard.js?v=16"></script>
-<script src="js/testcase.js?v=29"></script>
-<script src="js/testforge.js?v=1"></script>
-<script src="js/bugreport.js?v=24"></script>
-<script src="js/summary.js?v=16"></script>
+<script src="js/utils.js?v=31"></script>
+<script src="js/app.js?v=31"></script>
+<script src="js/activitylog.js?v=7"></script>
+<script src="js/workspace.js?v=5"></script>
+<script src="js/auth.js?v=23"></script>
+<script src="js/dashboard.js?v=17"></script>
+<script src="js/testcase.js?v=40"></script>
+<script src="js/testforge.js?v=2"></script>
+<script src="js/bugreport.js?v=39"></script>
+<script src="js/summary.js?v=18"></script>
+<script src="js/report.js?v=6"></script>
+<script src="js/notifications.js?v=3"></script>
 <script src="js/import.js?v=16"></script>
 <script src="js/export.js?v=16"></script>
 <script src="js/settings.js?v=16"></script>
 <script src="js/masterstatus.js?v=16"></script>
-<script src="js/usermanagement.js?v=17"></script>
+<script src="js/usermanagement.js?v=20"></script>
 <script>
   // Generic modal close (X button / Cancel buttons) + quick-add wiring.
   document.querySelectorAll('[data-close]').forEach(btn => {
