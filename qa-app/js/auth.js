@@ -10,19 +10,7 @@ const Auth = {
   ROLE_KEY: 'qa_role',
   EMAIL_KEY: 'qa_email',
   WORKSPACE_KEY: 'qa_workspace',
-  WORKSPACE_KEY: 'qa_workspace',
   DEFAULT_USERS: [
-    { email: 'admin@bugrail.local', password: 'sama', role: 'admin' }
-  ],
-
-  /* Seed roles — after first load these live in settings.roles and are
-     fully editable (add/edit/delete) from the Role Permission page.
-     'admin' is not stored here: it's a fixed, undeletable role (see isAdmin/can). */
-  DEFAULT_ROLES: [
-    { value: 'pm_ba', label: 'PM & BA' },
-    { value: 'qa_internal', label: 'QA Internal' },
-    { value: 'qa_vendor', label: 'QA Vendor' },
-    { value: 'user_umum', label: 'User Umum' }
     { email: 'admin@bugrail.local', password: 'sama', role: 'admin' }
   ],
 
@@ -77,10 +65,6 @@ const Auth = {
   },
 
   /* ---- Session ---- */
-  role(){
-    const r = sessionStorage.getItem(this.ROLE_KEY);
-    return r === 'user' ? 'user_umum' : r; // legacy role value from before the permission matrix
-  },
   role(){
     const r = sessionStorage.getItem(this.ROLE_KEY);
     return r === 'user' ? 'user_umum' : r; // legacy role value from before the permission matrix
@@ -276,10 +260,8 @@ const Auth = {
 
   logout(){
     ActivityLog.record('logout', `${this.currentEmail()} logout`);
-    ActivityLog.record('logout', `${this.currentEmail()} logout`);
     sessionStorage.removeItem(this.ROLE_KEY);
     sessionStorage.removeItem(this.EMAIL_KEY);
-    sessionStorage.removeItem(this.WORKSPACE_KEY);
     sessionStorage.removeItem(this.WORKSPACE_KEY);
     location.reload();
   },

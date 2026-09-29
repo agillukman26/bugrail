@@ -100,7 +100,6 @@ const Summary = {
     const failRate = total ? Math.round((failed/total)*100) : 0;
     const pct = (n) => total ? Math.round((n/total)*1000)/10 : 0;
     const resStats = computeBugResolutionStats(bugs);
-    const resStats = computeBugResolutionStats(bugs);
 
     document.getElementById('sumBody').innerHTML = `
       <div class="sum-section">
@@ -137,11 +136,6 @@ const Summary = {
             <span class="sum-card-value">${bugs.length}</span>
             <span class="sum-card-sub">100% dari keseluruhan bug</span>
             <div class="sum-mini-bar"><span style="width:100%;"></span></div>
-          </div>
-          <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
-            <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Pengerjaan Developer</span></div>
-            <span class="sum-card-value">${formatDuration(resStats.avgHours)}</span>
-            <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
           <div class="sum-card" style="--card-accent:var(--status-passed); --card-accent-bg:var(--status-passed-bg); justify-content:center;">
             <div class="sum-card-top"><span class="sum-card-icon">⏱️</span><span class="sum-card-label">Pengerjaan Developer</span></div>
@@ -218,23 +212,15 @@ const Summary = {
 /* Insight + recommendation lines derived from the current filtered summary —
      same numbers shown on screen, turned into plain-language conclusions
      (what's happening) and actionable recommendations (what to do) for the PDF. */
-/* Insight + recommendation lines derived from the current filtered summary —
-     same numbers shown on screen, turned into plain-language conclusions
-     (what's happening) and actionable recommendations (what to do) for the PDF. */
   buildAnalysis(d){
     const bugs = d.bugs || [];
-    const tcs = this._lastTC || [];
-    const findings = [];
-    const recommendations = [];
     const tcs = this._lastTC || [];
     const findings = [];
     const recommendations = [];
 
     if (!d.total){
       findings.push('Belum ada test case pada rentang filter ini.');
-      findings.push('Belum ada test case pada rentang filter ini.');
     } else if (d.passRate >= 80){
-      findings.push(`Progress testing baik: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
       findings.push(`Progress testing baik: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
     } else if (d.passRate >= 50){
       findings.push(`Progress testing masih moderat: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
@@ -242,23 +228,8 @@ const Summary = {
     } else if (d.total) {
       findings.push(`Pass rate rendah: ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
       recommendations.push('Pass rate di bawah 50% berisiko tinggi untuk rilis — pertimbangkan menunda rilis sampai isu utama diperbaiki.');
-      findings.push(`Progress testing masih moderat: pass rate ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
-      recommendations.push('Percepat eksekusi test case yang masih Open agar coverage lebih representatif sebelum rilis.');
-    } else if (d.total) {
-      findings.push(`Pass rate rendah: ${d.passRate}% (${d.passed}/${d.total} test case Passed).`);
-      recommendations.push('Pass rate di bawah 50% berisiko tinggi untuk rilis — pertimbangkan menunda rilis sampai isu utama diperbaiki.');
     }
 
-    if (d.failed){
-      findings.push(`Terdapat ${d.failed} test case Failed (${d.failRate}%) yang berpotensi menghasilkan bug baru.`);
-      if (!bugs.length) recommendations.push(`${d.failed} test case Failed belum punya bug report terkait — pastikan semua kegagalan sudah dicatat sebagai bug.`);
-    }
-    if (d.blocked){
-      findings.push(`${d.blocked} test case masih Blocked, kemungkinan menunggu dependency/environment.`);
-      recommendations.push('Tindak lanjuti test case Blocked dengan tim terkait (environment/data/akses) agar tidak menghambat eksekusi.');
-    }
-    if (d.notrun) findings.push(`${d.notrun} test case belum dieksekusi (Open).`);
-    if (d.retest) findings.push(`${d.retest} test case berstatus Retest, menunggu verifikasi ulang setelah perbaikan.`);
     if (d.failed){
       findings.push(`Terdapat ${d.failed} test case Failed (${d.failRate}%) yang berpotensi menghasilkan bug baru.`);
       if (!bugs.length) recommendations.push(`${d.failed} test case Failed belum punya bug report terkait — pastikan semua kegagalan sudah dicatat sebagai bug.`);
@@ -272,21 +243,13 @@ const Summary = {
 
     const moduleStats = {};
     tcs.forEach(t => {
-    tcs.forEach(t => {
       if (!t.module) return;
       moduleStats[t.module] = moduleStats[t.module] || { total:0, failed:0 };
       moduleStats[t.module].total++;
       if (t.status === 'Failed') moduleStats[t.module].failed++;
     });
     const riskyModules = Object.entries(moduleStats)
-    const riskyModules = Object.entries(moduleStats)
       .filter(([,s]) => s.failed > 0)
-      .sort((a,b) => (b[1].failed/b[1].total) - (a[1].failed/a[1].total))
-      .slice(0, 3);
-    if (riskyModules.length){
-      findings.push(`Modul dengan tingkat kegagalan tertinggi: ${riskyModules.map(([m,s]) => `"${m}" (${s.failed}/${s.total})`).join(', ')}.`);
-      recommendations.push(`Fokuskan regresi dan review kode pada modul "${riskyModules[0][0]}" karena proporsi kegagalannya paling tinggi.`);
-    }
       .sort((a,b) => (b[1].failed/b[1].total) - (a[1].failed/a[1].total))
       .slice(0, 3);
     if (riskyModules.length){
@@ -296,12 +259,10 @@ const Summary = {
 
     if (!bugs.length){
       findings.push('Tidak ada bug tercatat pada rentang filter ini.');
-      findings.push('Tidak ada bug tercatat pada rentang filter ini.');
     } else {
       const critical = bugs.filter(b=>b.severity==='Critical').length;
       const high = bugs.filter(b=>b.severity==='High').length;
       const openBugs = bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length;
-      const reopened = bugs.filter(b=>b.status==='Reopened').length;
       const reopened = bugs.filter(b=>b.status==='Reopened').length;
       const closedBugs = bugs.filter(b=>b.status==='Closed').length;
       findings.push(`${openBugs} bug masih terbuka (Open/Assigned/Reopened), ${closedBugs} bug sudah Closed dari total ${bugs.length} bug.`);
@@ -357,43 +318,14 @@ const Summary = {
     if (!recommendations.length) recommendations.push('Tidak ada catatan risiko signifikan pada rentang filter ini — pertahankan ritme testing saat ini.');
 
     return { findings, recommendations };
-    if (!recommendations.length) recommendations.push('Tidak ada catatan risiko signifikan pada rentang filter ini — pertahankan ritme testing saat ini.');
-
-    return { findings, recommendations };
   },
 
   exportPDF(){
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     doc.setFont('helvetica', 'normal');
-    doc.setFont('helvetica', 'normal');
     const d = this._lastData || {};
     const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const ink = [31, 41, 55];       // dark slate — headings
-    const dim = [107, 114, 128];    // muted gray — sub text
-    const line = [222, 226, 232];   // hairline gray — table borders
-    const soft = [246, 247, 249];   // pale gray — header fill / zebra
-
-    const sectionTitle = (text, y) => {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5); doc.setTextColor(...ink);
-      doc.text(text, 14, y);
-      doc.setDrawColor(...line); doc.setLineWidth(.4);
-      doc.line(14, y + 2, pageW - 14, y + 2);
-      doc.setFont('helvetica', 'normal');
-      return y + 8;
-    };
-    const ensureSpace = (y, needed) => {
-      if (y + needed > pageH - 14){ doc.addPage(); return 16; }
-      return y;
-    };
-
-    doc.setTextColor(...ink); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
-    doc.text('QA Testing Summary Report', 14, 18);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...dim);
-    doc.text(`Generated: ${new Date().toLocaleString('id-ID')}`, pageW - 14, 18, { align: 'right' });
-    doc.setDrawColor(...ink); doc.setLineWidth(.6);
-    doc.line(14, 22, pageW - 14, 22);
     const pageH = doc.internal.pageSize.getHeight();
     const ink = [31, 41, 55];       // dark slate — headings
     const dim = [107, 114, 128];    // muted gray — sub text
@@ -442,19 +374,6 @@ const Summary = {
     };
 
     let y = sectionTitle('Test Case Summary', 38);
-    doc.setFontSize(9); doc.setTextColor(...dim);
-    doc.text(filterBits.length ? `Filter: ${filterBits.join(' | ')}` : 'Filter: Semua Data', 14, 29);
-
-    const tableTheme = {
-      theme: 'grid',
-      headStyles: { fillColor: soft, textColor: ink, halign: 'center', fontStyle: 'bold', lineColor: line, lineWidth: .3 },
-      bodyStyles: { halign: 'center', textColor: ink, lineColor: line, lineWidth: .3 },
-      alternateRowStyles: { fillColor: [252, 252, 253] },
-      styles: { fontSize: 9, font: 'helvetica' },
-      margin: { left: 14, right: 14 }
-    };
-
-    let y = sectionTitle('Test Case Summary', 38);
     doc.autoTable({
       startY: y,
       head: [['Total Module','Total TC','Open','Passed','Blocked','Failed','Retest','Pass Rate']],
@@ -463,12 +382,9 @@ const Summary = {
         d.blocked || 0, d.failed || 0, d.retest || 0, `${d.passRate || 0}%`
       ]],
       ...tableTheme
-      ...tableTheme
     });
     y = doc.lastAutoTable.finalY + 12;
-    y = doc.lastAutoTable.finalY + 12;
 
-    y = sectionTitle('Bug Report Summary', y);
     y = sectionTitle('Bug Report Summary', y);
     const bugs = d.bugs || [];
     doc.autoTable({
@@ -484,21 +400,16 @@ const Summary = {
         bugs.filter(b=>b.status==='Closed').length
       ]],
       ...tableTheme
-      ...tableTheme
     });
     y = doc.lastAutoTable.finalY + 10;
-    y = doc.lastAutoTable.finalY + 10;
 
-    y = ensureSpace(y, 55);
     y = ensureSpace(y, 55);
     [['sumDonutSeverity','Distribusi Severity'], ['sumDonutPriority','Distribusi Priority']].forEach(([id, label], i) => {
       const canvas = document.getElementById(id);
       if (!canvas) return;
       const x = 14 + i * 95;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...ink);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...ink);
       doc.text(label, x, y);
-      doc.setFont('helvetica', 'normal');
       doc.setFont('helvetica', 'normal');
       doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y + 3, 40, 40);
     });
@@ -521,25 +432,7 @@ const Summary = {
     y = sectionTitle('Rekomendasi', y);
     doc.setFontSize(9.5); doc.setTextColor(...ink);
     recommendations.forEach(note => {
-    const { findings, recommendations } = this.buildAnalysis(d);
-
-    y = ensureSpace(y, 16);
-    y = sectionTitle('Analisa', y);
-    doc.setFontSize(9.5); doc.setTextColor(...ink);
-    findings.forEach(note => {
       const wrapped = doc.splitTextToSize(`•  ${note}`, pageW - 28);
-      y = ensureSpace(y, wrapped.length * 5);
-      doc.text(wrapped, 14, y);
-      y += wrapped.length * 5 + 2;
-    });
-    y += 4;
-
-    y = ensureSpace(y, 16);
-    y = sectionTitle('Rekomendasi', y);
-    doc.setFontSize(9.5); doc.setTextColor(...ink);
-    recommendations.forEach(note => {
-      const wrapped = doc.splitTextToSize(`•  ${note}`, pageW - 28);
-      y = ensureSpace(y, wrapped.length * 5);
       y = ensureSpace(y, wrapped.length * 5);
       doc.text(wrapped, 14, y);
       y += wrapped.length * 5 + 2;
@@ -547,54 +440,6 @@ const Summary = {
 
     doc.save(`QA_Summary_${todayISO()}.pdf`);
     Toast.show('Export PDF Summary berhasil.', 'success');
-  },
-
-  /* Same numbers as the PDF (test case + bug totals, per-bug retest count,
-     findings/recommendations) but as a workbook so the raw analytic data
-     can be reused elsewhere (pivot, share with stakeholders, etc). */
-  exportExcel(){
-    const d = this._lastData || {};
-    const bugs = d.bugs || [];
-    const { findings, recommendations } = this.buildAnalysis(d);
-
-    const tcSheet = XLSX.utils.json_to_sheet([{
-      'Total Module': d.tcs?.totalModules ?? 0, 'Total Test Case': d.total || 0,
-      Open: d.notrun || 0, Passed: d.passed || 0, Blocked: d.blocked || 0,
-      Failed: d.failed || 0, Retest: d.retest || 0, 'Pass Rate (%)': d.passRate || 0
-    }]);
-
-    const resStats = computeBugResolutionStats(bugs);
-    const bugSheet = XLSX.utils.json_to_sheet([{
-      'Total Bug': bugs.length,
-      Critical: bugs.filter(b=>b.severity==='Critical').length,
-      High: bugs.filter(b=>b.severity==='High').length,
-      Medium: bugs.filter(b=>b.severity==='Medium').length,
-      Low: bugs.filter(b=>b.severity==='Low').length,
-      Open: bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length,
-      Closed: bugs.filter(b=>b.status==='Closed').length,
-      'Avg Resolusi (jam)': resStats.avgHours || 0,
-      'Bug Terukur Resolusi': resStats.resolvedCount || 0
-    }]);
-
-    const retestSheet = XLSX.utils.json_to_sheet(
-      bugs.map(b => ({
-        'Bug ID': b.id, 'Bug Title': b.title, Module: b.module, Severity: b.severity,
-        Status: b.status, 'Jumlah Retest': BugReportModule.reopenCount(b)
-      })).sort((a,b) => b['Jumlah Retest'] - a['Jumlah Retest'])
-    );
-
-    const analysisSheet = XLSX.utils.json_to_sheet([
-      ...findings.map(text => ({ Tipe: 'Analisa', Catatan: text })),
-      ...recommendations.map(text => ({ Tipe: 'Rekomendasi', Catatan: text }))
-    ]);
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, tcSheet, 'Test Case Summary');
-    XLSX.utils.book_append_sheet(wb, bugSheet, 'Bug Summary');
-    XLSX.utils.book_append_sheet(wb, retestSheet, 'Retest per Bug');
-    XLSX.utils.book_append_sheet(wb, analysisSheet, 'Analisa & Rekomendasi');
-    XLSX.writeFile(wb, `QA_Summary_Data_${todayISO()}.xlsx`);
-    Toast.show('Export Data Summary berhasil.', 'success');
   },
 
   /* Same numbers as the PDF (test case + bug totals, per-bug retest count,
@@ -658,12 +503,7 @@ const Summary = {
       const el = document.getElementById(id);
       el.addEventListener('click', () => { if (el.showPicker) el.showPicker(); });
     });
-    ['sumDateFrom','sumDateTo'].forEach(id => {
-      const el = document.getElementById(id);
-      el.addEventListener('click', () => { if (el.showPicker) el.showPicker(); });
-    });
     document.getElementById('sumExportPdfBtn').addEventListener('click', () => this.exportPDF());
-    document.getElementById('sumExportExcelBtn').addEventListener('click', () => this.exportExcel());
     document.getElementById('sumExportExcelBtn').addEventListener('click', () => this.exportExcel());
   }
 };

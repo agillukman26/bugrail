@@ -20,24 +20,6 @@ function positionRowActionsPanel(btn, panel){
   }
 }
 
-let stepsEditor = null;
-
-/* Row-action dropdown lives inside .table-wrap (overflow-x:auto), which
-   clips any absolutely-positioned child that overflows it — so a panel
-   near the bottom of the table got cut off. Escape that by switching the
-   panel to viewport-fixed coords anchored to its trigger button. */
-function positionRowActionsPanel(btn, panel){
-  const r = btn.getBoundingClientRect();
-  panel.classList.add('dropdown-panel-fixed');
-  panel.style.top = `${r.bottom + 6}px`;
-  panel.style.left = 'auto';
-  panel.style.right = `${window.innerWidth - r.right}px`;
-  const panelHeight = panel.offsetHeight;
-  if (r.bottom + 6 + panelHeight > window.innerHeight){
-    panel.style.top = `${r.top - panelHeight - 6}px`;
-  }
-}
-
 const TestCaseModule = {
   STATUS: ['Open', 'Passed', 'Failed', 'Blocked', 'Retest'],
   TYPE_TEST: ['Negative', 'Positive'],
@@ -50,7 +32,7 @@ const TestCaseModule = {
     selected: new Set(),
     editingId: null,
     executingId: null,
-    activeFileId: sessionStorage.getItem('qa_tc_active_file') || null
+    activeFileId: null
   },
 
   setSearch(term){ this.ui.search = term; this.ui.page = 1; this.render(); },
@@ -62,26 +44,17 @@ const TestCaseModule = {
     App.state.testcases.forEach(t => { if (t.fileId) counts[t.fileId] = (counts[t.fileId] || 0) + 1; });
     return counts;
   },
-  files(){ return Auth.visibleFiles(App.state.files); },
-  fileCounts(){
-    const counts = {};
-    App.state.testcases.forEach(t => { if (t.fileId) counts[t.fileId] = (counts[t.fileId] || 0) + 1; });
-    return counts;
-  },
   fileCount(fileId){ return App.state.testcases.filter(t => t.fileId === fileId).length; },
   openFile(fileId){
     this.ui.activeFileId = fileId; this.ui.page = 1; this.ui.selected.clear();
-    sessionStorage.setItem('qa_tc_active_file', fileId);
     this.render();
   },
   backToFiles(){
     this.ui.activeFileId = null; this.ui.search = '';
-    sessionStorage.removeItem('qa_tc_active_file');
     const globalSearch = document.getElementById('globalSearch');
     if (globalSearch) globalSearch.value = '';
     this.render();
   },
-  createFile(name, workspaceId = Auth.currentWorkspaceId()){
   createFile(name, workspaceId = Auth.currentWorkspaceId()){
     name = (name || '').trim();
     if (!name) return;
@@ -89,11 +62,9 @@ const TestCaseModule = {
     App.state.files.push(file);
     App.saveFiles();
     ActivityLog.record('tc_file_create', `File Test Case "${name}" dibuat`);
-    ActivityLog.record('tc_file_create', `File Test Case "${name}" dibuat`);
     this.renderFileList();
     Toast.show(`File "${name}" dibuat.`, 'success');
   },
-  async editFile(fileId){
   async editFile(fileId){
     const file = this.files().find(f => f.id === fileId);
     if (!file) return;
@@ -104,13 +75,6 @@ const TestCaseModule = {
     const oldShared = (file.sharedWith || []).slice().sort();
     file.name = result.name;
     if (canShare) file.sharedWith = result.sharedWith;
-    const canShare = Auth.canShareFile(file);
-    const result = await fileEditDialog(file, canShare, Auth.workspaces());
-    if (!result) return;
-    const oldName = file.name;
-    const oldShared = (file.sharedWith || []).slice().sort();
-    file.name = result.name;
-    if (canShare) file.sharedWith = result.sharedWith;
     App.saveFiles();
     if (oldName !== file.name) ActivityLog.record('tc_file_rename', `File Test Case "${oldName}" diganti nama jadi "${file.name}"`);
     const newShared = (file.sharedWith || []).slice().sort();
@@ -119,15 +83,7 @@ const TestCaseModule = {
         ? `File Test Case "${file.name}" dibagikan ke ${newShared.length} workspace`
         : `Sharing File Test Case "${file.name}" dihapus`);
     }
-    if (oldName !== file.name) ActivityLog.record('tc_file_rename', `File Test Case "${oldName}" diganti nama jadi "${file.name}"`);
-    const newShared = (file.sharedWith || []).slice().sort();
-    if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
-      ActivityLog.record('tc_file_share', newShared.length
-        ? `File Test Case "${file.name}" dibagikan ke ${newShared.length} workspace`
-        : `Sharing File Test Case "${file.name}" dihapus`);
-    }
     this.render();
-    Toast.show(`File "${file.name}" diperbarui.`, 'success');
     Toast.show(`File "${file.name}" diperbarui.`, 'success');
   },
   async deleteFile(fileId){
@@ -187,7 +143,6 @@ const TestCaseModule = {
     document.getElementById('tcFileListView').style.display = inFile ? 'none' : 'block';
     document.getElementById('tcFileDetailView').style.display = inFile ? 'block' : 'none';
     document.getElementById('tcNewFileBtn').style.display = Auth.can('testcase_create') ? '' : 'none';
-    document.getElementById('tcNewFileBtn').style.display = Auth.can('testcase_create') ? '' : 'none';
     if (!inFile){ this.renderFileList(); return; }
 
     const activeFile = this.files().find(f => f.id === this.ui.activeFileId);
@@ -214,20 +169,10 @@ const TestCaseModule = {
     document.getElementById('tcEmptyAddBtn').style.display = canCreate ? '' : 'none';
     document.getElementById('tcImportBtn').style.display = canCreate ? '' : 'none';
 
-    const canCreate = Auth.can('testcase_create');
-    const canUpdate = Auth.can('testcase_update');
-    const canDelete = Auth.can('testcase_delete');
-    const canCreateBug = Auth.can('bugreport_create');
-    document.getElementById('tcAddBtn').style.display = canCreate ? '' : 'none';
-    document.getElementById('tcEmptyAddBtn').style.display = canCreate ? '' : 'none';
-    document.getElementById('tcImportBtn').style.display = canCreate ? '' : 'none';
-
     const body = document.getElementById('tcTableBody');
     const bulkBar = document.getElementById('tcBulkBar');
     bulkBar.style.display = this.ui.selected.size ? 'flex' : 'none';
     bulkBar.querySelector('.count').textContent = this.ui.selected.size;
-    document.getElementById('tcBulkDeleteBtn').style.display = canDelete ? '' : 'none';
-    document.getElementById('tcBulkStatusSelect').style.display = canUpdate ? '' : 'none';
     document.getElementById('tcBulkDeleteBtn').style.display = canDelete ? '' : 'none';
     document.getElementById('tcBulkStatusSelect').style.display = canUpdate ? '' : 'none';
 
@@ -241,9 +186,7 @@ const TestCaseModule = {
 
     body.innerHTML = pageRows.map(tc => `
       <tr>
-      <tr>
         <td><input type="checkbox" class="checkbox tc-row-check" data-id="${tc.id}" ${this.ui.selected.has(tc.id) ? 'checked':''}></td>
-        <td class="mono tc-id-link" data-view="${tc.id}" style="cursor:pointer; text-decoration:underline;" title="${escapeHtml(tc.steps ? `Test Step:\n${stripHtml(tc.steps)}` : 'Belum ada Test Step')}">${escapeHtml(tc.id)}</td>
         <td class="mono tc-id-link" data-view="${tc.id}" style="cursor:pointer; text-decoration:underline;" title="${escapeHtml(tc.steps ? `Test Step:\n${stripHtml(tc.steps)}` : 'Belum ada Test Step')}">${escapeHtml(tc.id)}</td>
         <td class="truncate" title="${escapeHtml(tc.module)}">${escapeHtml(tc.module)}</td>
         <td class="truncate" title="${escapeHtml(tc.roleUser)}">${escapeHtml(tc.roleUser || '-')}</td>
@@ -254,16 +197,6 @@ const TestCaseModule = {
         <td>${this.evidenceCell(tc.evidence)}</td>
         <td class="col-hidden">${formatDate(tc.executionDate)}</td>
         <td class="cell-actions">
-          <div class="dropdown">
-            <button class="row-actions-btn" type="button" title="Aksi">⋮</button>
-            <div class="dropdown-panel right">
-              ${canUpdate ? `<button class="dropdown-item" data-act="run" data-id="${tc.id}">▶ Run</button>` : ''}
-              ${canUpdate ? `<button class="dropdown-item" data-act="edit" data-id="${tc.id}">✎ Edit</button>` : ''}
-              ${canCreate ? `<button class="dropdown-item" data-act="dup" data-id="${tc.id}">⧉ Duplicate</button>` : ''}
-              ${canDelete ? `<button class="dropdown-item" data-act="del" data-id="${tc.id}">🗑 Hapus</button>` : ''}
-              ${tc.status === 'Failed' && canCreateBug ? `<button class="dropdown-item" data-act="bug" data-id="${tc.id}">🐞 Create Bug</button>` : ''}
-            </div>
-          </div>
           <div class="dropdown">
             <button class="row-actions-btn" type="button" title="Aksi">⋮</button>
             <div class="dropdown-panel right">
@@ -360,14 +293,6 @@ const TestCaseModule = {
     this.render();
   },
 
-  resetFilters(){
-    this.ui.filters = { module:'', typeTest:'', status:'' };
-    this.ui.page = 1;
-    document.getElementById('tcFilterTypeTest').value = '';
-    document.getElementById('tcFilterStatus').value = '';
-    this.render();
-  },
-
   renderPagination(totalPages){
     const el = document.getElementById('tcPagination');
     let html = `<button ${this.ui.page===1?'disabled':''} data-pg="prev">‹</button>`;
@@ -393,9 +318,6 @@ const TestCaseModule = {
     document.querySelectorAll('.tc-id-link').forEach(td => {
       td.onclick = () => this.openDetail(td.dataset.view);
     });
-    document.querySelectorAll('.tc-id-link').forEach(td => {
-      td.onclick = () => this.openDetail(td.dataset.view);
-    });
     document.querySelectorAll('.tc-row-check').forEach(cb => {
       cb.onchange = () => {
         cb.checked ? this.ui.selected.add(cb.dataset.id) : this.ui.selected.delete(cb.dataset.id);
@@ -411,19 +333,9 @@ const TestCaseModule = {
         if (opening) positionRowActionsPanel(btn, dd.querySelector('.dropdown-panel'));
       };
     });
-    document.querySelectorAll('#tcTableBody .row-actions-btn').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const dd = btn.closest('.dropdown');
-        document.querySelectorAll('.dropdown.open').forEach(o => { if (o !== dd) o.classList.remove('open'); });
-        const opening = dd.classList.toggle('open');
-        if (opening) positionRowActionsPanel(btn, dd.querySelector('.dropdown-panel'));
-      };
-    });
     document.querySelectorAll('#tcTableBody button[data-act]').forEach(btn => {
       btn.onclick = () => {
         const { act, id } = btn.dataset;
-        btn.closest('.dropdown').classList.remove('open');
         btn.closest('.dropdown').classList.remove('open');
         if (act === 'run') this.openExecute(id);
         if (act === 'edit') this.openForm(id);
@@ -440,9 +352,6 @@ const TestCaseModule = {
     if (!tc && !Auth.can('testcase_create')){ Toast.show('Tidak punya izin menambah Test Case.', 'error'); return; }
     if (tc && !Auth.can('testcase_update')){ Toast.show('Tidak punya izin mengedit Test Case.', 'error'); return; }
     this.ui.editingId = id;
-    if (!tc && !Auth.can('testcase_create')){ Toast.show('Tidak punya izin menambah Test Case.', 'error'); return; }
-    if (tc && !Auth.can('testcase_update')){ Toast.show('Tidak punya izin mengedit Test Case.', 'error'); return; }
-    this.ui.editingId = id;
     const f = document.getElementById('tcForm');
     f.reset();
     this.showModuleError('');
@@ -451,7 +360,6 @@ const TestCaseModule = {
     if (tc){
       this.setModule(tc.module); f.roleUser.value = tc.roleUser || ''; f.scenario.value = tc.scenario;
       f.testCase.value = tc.testCase || '';
-      f.preconditions.value = tc.preconditions || ''; stepsEditor.root.innerHTML = tc.steps || '';
       f.preconditions.value = tc.preconditions || ''; stepsEditor.root.innerHTML = tc.steps || '';
       f.testData.value = tc.testData || '';
       f.expectedResult.value = tc.expectedResult || ''; f.actualResult.value = tc.actualResult || '';
@@ -462,7 +370,6 @@ const TestCaseModule = {
     if (!tc){
       this.setModule('');
       f.status.value = 'Open'; f.typeTest.value = 'Positive';
-      stepsEditor.root.innerHTML = '';
       stepsEditor.root.innerHTML = '';
     }
     this.renderCustomFields(tc ? tc.customFields : null);
@@ -588,48 +495,9 @@ const TestCaseModule = {
     }
   },
 
-  /* ---- Translate whole file (ID<->EN) — direction auto-detected per test case ---- */
-  async translateActiveFile(){
-    if (!this.ui.activeFileId){ Toast.show('Buka salah satu file test case dulu.', 'error'); return; }
-    if (!Auth.can('testcase_update')){ Toast.show('Tidak punya izin mengedit Test Case.', 'error'); return; }
-    const rows = App.state.testcases.filter(t => t.fileId === this.ui.activeFileId);
-    if (!rows.length){ Toast.show('File ini belum punya test case.', 'error'); return; }
-    const ok = await confirmDialog('Translate File?', `${rows.length} test case di file ini akan diterjemahkan (ID⇄EN otomatis) dan langsung disimpan.`, 'Translate');
-    if (!ok) return;
-
-    const textFields = ['scenario', 'testCase', 'preconditions', 'testData', 'expectedResult', 'actualResult'];
-    const btn = document.getElementById('tcTranslateFileBtn');
-    btn.disabled = true;
-    btn.textContent = '🌐 Translating...';
-    try {
-      for (const tc of rows){
-        const from = detectLang([tc.scenario, tc.testCase].filter(Boolean).join(' '));
-        const to = from === 'id' ? 'en' : 'id';
-        const langpair = `${from}|${to}`;
-        const stepsText = stepsHtmlToText(tc.steps || '');
-        const [translatedFields, translatedSteps] = await Promise.all([
-          Promise.all(textFields.map(name => translateText(tc[name], langpair))),
-          stepsText ? translateText(stepsText, langpair) : Promise.resolve('')
-        ]);
-        textFields.forEach((name, i) => { tc[name] = translatedFields[i]; });
-        if (translatedSteps) tc.steps = textToStepsHtml(translatedSteps);
-      }
-      App.saveTestcases();
-      this.render();
-      Toast.show(`${rows.length} test case diterjemahkan.`, 'success');
-    } catch (err) {
-      console.error(err);
-      Toast.show('Gagal menerjemahkan. Coba lagi.', 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '🌐 Translate';
-    }
-  },
-
   submitForm(e){
     e.preventDefault();
     const f = e.target;
-    f.steps.value = stepsEditor.getText().trim() ? stepsEditor.root.innerHTML : '';
     f.steps.value = stepsEditor.getText().trim() ? stepsEditor.root.innerHTML : '';
     const data = {
       module: f.module.value.trim(), roleUser: f.roleUser.value.trim(), scenario: f.scenario.value.trim(),
@@ -648,7 +516,6 @@ const TestCaseModule = {
     if (this.ui.editingId){
       const idx = App.state.testcases.findIndex(t => t.id === this.ui.editingId);
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
-      ActivityLog.record('testcase_update', `Test Case ${this.ui.editingId} diperbarui`);
       ActivityLog.record('testcase_update', `Test Case ${this.ui.editingId} diperbarui`);
       Toast.show(`Test case ${this.ui.editingId} diperbarui.`, 'success');
     } else {
@@ -722,14 +589,11 @@ const TestCaseModule = {
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
     const from = App.state.testcases[idx].status;
     const id = App.state.testcases[idx].id;
-    const from = App.state.testcases[idx].status;
-    const id = App.state.testcases[idx].id;
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
     App.state.testcases[idx].executionDate = todayISO();
     App.saveTestcases();
-    if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`);
     if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`);
     this.closeExecute();
     this.render();
@@ -737,7 +601,6 @@ const TestCaseModule = {
   },
 
   duplicate(id){
-    if (!Auth.can('testcase_create')) return;
     if (!Auth.can('testcase_create')) return;
     const tc = this.all().find(t => t.id === id);
     const newId = IdGen.next(moduleAbbrev(tc.module));
@@ -749,12 +612,10 @@ const TestCaseModule = {
 
   async remove(id){
     if (!Auth.can('testcase_delete')) return;
-    if (!Auth.can('testcase_delete')) return;
     const ok = await confirmDialog('Hapus Test Case?', `${id} akan dihapus. Tindakan ini dapat di-undo sebentar.`);
     if (!ok) return;
     const idx = App.state.testcases.findIndex(t => t.id === id);
     const removed = App.state.testcases.splice(idx, 1)[0];
-    ActivityLog.record('testcase_delete', `Test Case ${id} dihapus`);
     ActivityLog.record('testcase_delete', `Test Case ${id} dihapus`);
     App.saveTestcases();
     this.ui.selected.delete(id);
@@ -766,13 +627,11 @@ const TestCaseModule = {
 
   async bulkDelete(){
     if (!this.ui.selected.size || !Auth.can('testcase_delete')) return;
-    if (!this.ui.selected.size || !Auth.can('testcase_delete')) return;
     const ids = [...this.ui.selected];
     const ok = await confirmDialog('Hapus Test Case Terpilih?', `${ids.length} test case akan dihapus.`);
     if (!ok) return;
     const removed = App.state.testcases.filter(t => ids.includes(t.id));
     App.state.testcases = App.state.testcases.filter(t => !ids.includes(t.id));
-    ActivityLog.record('testcase_delete', `${ids.length} test case dihapus (bulk)`);
     ActivityLog.record('testcase_delete', `${ids.length} test case dihapus (bulk)`);
     App.saveTestcases();
     this.ui.selected.clear();
@@ -786,11 +645,7 @@ const TestCaseModule = {
     if (!this.ui.selected.size || !status || !Auth.can('testcase_update')) return;
     let changed = 0;
     App.state.testcases.forEach(t => { if (this.ui.selected.has(t.id) && t.status !== status){ t.status = status; changed++; } });
-    if (!this.ui.selected.size || !status || !Auth.can('testcase_update')) return;
-    let changed = 0;
-    App.state.testcases.forEach(t => { if (this.ui.selected.has(t.id) && t.status !== status){ t.status = status; changed++; } });
     App.saveTestcases();
-    if (changed) ActivityLog.record('testcase_update', `${changed} test case status diubah menjadi ${status} (bulk)`);
     if (changed) ActivityLog.record('testcase_update', `${changed} test case status diubah menjadi ${status} (bulk)`);
     this.render();
     Toast.show(`Status ${this.ui.selected.size} test case diubah menjadi ${status}.`, 'success');
@@ -804,7 +659,6 @@ const TestCaseModule = {
 
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
-    if (!Auth.can('testcase_create')) return;
     if (!Auth.can('testcase_create')) return;
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -824,7 +678,6 @@ const TestCaseModule = {
             scenario, testCase: r['Test Case'] || r.testCase || '',
             preconditions: r['Pre Kondisi'] || r.Preconditions || r.preconditions || '',
             steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
-            steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
             expectedResult: r['Expected Result'] || r.expectedResult || '',
             actualResult: '', evidence: r['Evidence'] || r.evidence || '', status: 'Open',
             typeTest: r['Type Test'] || r.typeTest || 'Positive',
@@ -834,7 +687,6 @@ const TestCaseModule = {
         });
         App.ensureDefaultFile();
         App.saveTestcases();
-        ActivityLog.record('testcase_create', `${count} test case di-import dari file`);
         ActivityLog.record('testcase_create', `${count} test case di-import dari file`);
         this.render();
         Toast.show(`${count} test case berhasil di-import.`, 'success');
@@ -883,24 +735,7 @@ const TestCaseModule = {
   },
 
   /* One styled sheet: header fill, borders + wrap text on every cell, and a
-  /* Excel sheet name: max 31 chars, can't contain \ / ? * [ ] : ; dedup
-     with a numeric suffix if two modules sanitize to the same name. */
-  safeSheetName(name, used){
-    let base = String(name || 'Tanpa Module').replace(/[\\/?*[\]:]/g, '-').trim().slice(0, 31) || 'Module';
-    let candidate = base;
-    let n = 2;
-    while (used.has(candidate)){
-      const suffix = ` (${n++})`;
-      candidate = base.slice(0, 31 - suffix.length) + suffix;
-    }
-    used.add(candidate);
-    return candidate;
-  },
-
-  /* One styled sheet: header fill, borders + wrap text on every cell, and a
      dropdown (data validation) on the Type Test / Status columns. */
-  buildSheet(wb, sheetName, cols, rows){
-    const ws = wb.addWorksheet(sheetName);
   buildSheet(wb, sheetName, cols, rows){
     const ws = wb.addWorksheet(sheetName);
     ws.columns = cols.map(c => ({ header: c.label, key: c.key, width: c.width }));
@@ -957,14 +792,12 @@ const TestCaseModule = {
     const buf = await wb.xlsx.writeBuffer();
     downloadBlob(buf, `TestCases_${todayISO()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke Excel`);
-    ActivityLog.record('testcase_export', `${rows.length} test case di-export ke Excel`);
     Toast.show('Export Excel Test Case berhasil.', 'success');
   },
   exportCSV(){
     const cols = [{ key:'no', label:'No' }, ...this.exportColumns()];
     const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1 }));
     downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');
-    ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     Toast.show('Export CSV Test Case berhasil (siap import ke Google Spreadsheet).', 'success');
   },
@@ -992,7 +825,6 @@ const TestCaseModule = {
     document.getElementById('tcForm').addEventListener('submit', e => this.submitForm(e));
     document.getElementById('runForm').addEventListener('submit', e => this.submitExecute(e));
     document.getElementById('tcTranslateFileBtn').addEventListener('click', () => this.translateActiveFile());
-    document.getElementById('tcTranslateFileBtn').addEventListener('click', () => this.translateActiveFile());
     document.getElementById('tcModuleTrigger').addEventListener('click', () => this.openModuleCombobox());
     document.getElementById('tcModuleSearch').addEventListener('input', e => { this.showModuleError(''); this.renderModuleList(e.target.value); });
     document.getElementById('tcModuleAddBtn').addEventListener('click', () => this.addNewModule());
@@ -1008,7 +840,6 @@ const TestCaseModule = {
         this.ui.filters[map[id]] = e.target.value; this.ui.page = 1; this.render();
       });
     });
-    document.getElementById('tcFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.getElementById('tcFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.querySelectorAll('#tcTable thead th.sortable').forEach(th => {
       th.addEventListener('click', () => {
@@ -1056,52 +887,9 @@ const TestCaseModule = {
       this.importFile(pendingFile);
       importOverlay.classList.remove('active');
       resetImportModal();
-    const importOverlay = document.getElementById('tcImportModalOverlay');
-    const importDz = document.getElementById('tcImportDropzone');
-    const importInput = document.getElementById('tcImportFileInput');
-    const importPending = document.getElementById('tcImportPending');
-    const importConfirmBtn = document.getElementById('tcImportConfirmBtn');
-    let pendingFile = null;
-
-    const stageFile = (file) => {
-      if (!file) return;
-      pendingFile = file;
-      document.getElementById('tcImportFileName').textContent = file.name;
-      document.getElementById('tcImportFileSize').textContent = `${(file.size / 1024).toFixed(1)} KB`;
-      importDz.style.display = 'none';
-      importPending.style.display = 'block';
-      importConfirmBtn.style.display = 'inline-flex';
-    };
-    const resetImportModal = () => {
-      pendingFile = null;
-      importDz.style.display = 'flex';
-      importPending.style.display = 'none';
-      importConfirmBtn.style.display = 'none';
-    };
-
-    document.getElementById('tcImportBtn').addEventListener('click', () => { resetImportModal(); importOverlay.classList.add('active'); });
-    document.getElementById('tcImportTemplateBtn').addEventListener('click', () => ImportPage.downloadTemplate());
-    document.getElementById('tcImportCancelBtn').addEventListener('click', resetImportModal);
-    importDz.addEventListener('click', () => importInput.click());
-    importInput.addEventListener('change', e => { stageFile(e.target.files[0]); e.target.value = ''; });
-    ['dragenter','dragover'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.add('dragover'); }));
-    ['dragleave','drop'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.remove('dragover'); }));
-    importDz.addEventListener('drop', e => stageFile(e.dataTransfer.files[0]));
-    importConfirmBtn.addEventListener('click', () => {
-      if (!pendingFile) return;
-      this.importFile(pendingFile);
-      importOverlay.classList.remove('active');
-      resetImportModal();
     });
     document.getElementById('tcBackToFilesBtn').addEventListener('click', () => this.backToFiles());
     document.getElementById('tcNewFileBtn').addEventListener('click', async () => {
-      if (Auth.isAdmin()){
-        const result = await fileCreateDialog(Auth.workspaces());
-        if (result) this.createFile(result.name, result.workspaceId);
-      } else {
-        const name = await promptDialog('File Baru', 'Nama file, misal: Sprint 12', '', 'Buat File');
-        if (name) this.createFile(name);
-      }
       if (Auth.isAdmin()){
         const result = await fileCreateDialog(Auth.workspaces());
         if (result) this.createFile(result.name, result.workspaceId);

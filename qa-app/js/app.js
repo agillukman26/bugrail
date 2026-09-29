@@ -12,7 +12,6 @@ const App = {
     bugs: [],
     files: [],
     activityLog: [],
-    activityLog: [],
     settings: { theme: 'light', customFieldDefs: [] },
     currentPage: 'dashboard'
   },
@@ -23,12 +22,8 @@ const App = {
     this.state.bugs = Storage.get(STORAGE_KEYS.BUGS, []);
     this.state.files = Storage.get(STORAGE_KEYS.FILES, []);
     this.state.activityLog = Storage.get(STORAGE_KEYS.ACTIVITY_LOG, []);
-    this.state.activityLog = Storage.get(STORAGE_KEYS.ACTIVITY_LOG, []);
     this.state.settings = Storage.get(STORAGE_KEYS.SETTINGS, { theme: 'light', customFieldDefs: [] });
     this.state.testcases.forEach(t => { if (t.status === 'Not Run') t.status = 'Open'; });
-    this.ensureRoles();
-    this.ensureRolePermissions();
-    if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureRoles();
     this.ensureRolePermissions();
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
@@ -79,7 +74,6 @@ const App = {
   saveBugs(){ Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); },
   saveFiles(){ Storage.set(STORAGE_KEYS.FILES, this.state.files); },
   saveActivityLog(){ Storage.set(STORAGE_KEYS.ACTIVITY_LOG, this.state.activityLog); },
-  saveActivityLog(){ Storage.set(STORAGE_KEYS.ACTIVITY_LOG, this.state.activityLog); },
   saveSettings(){ Storage.set(STORAGE_KEYS.SETTINGS, this.state.settings); },
 
   /* Called after any mutation — keeps sidebar counts & any open
@@ -94,7 +88,6 @@ const App = {
   /* ---- Routing (simple show/hide, no history API needed offline) ---- */
   goTo(page){
     this.state.currentPage = page;
-    sessionStorage.setItem(this.LAST_PAGE_KEY, page);
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
     const pageEl = document.getElementById(`page-${page}`);
@@ -121,10 +114,7 @@ const App = {
       importexport: ['Import & Export', 'Import Test Case, export data, backup & restore'],
       usermanagement: ['User Management', 'Kelola akun login (Admin & User)'],
       rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
-      rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
       settings: ['Settings', 'Preferensi aplikasi & data'],
-      masterstatus: ['Status Bug Report', 'Master data status bug report'],
-      activitylog: ['Activity Log', 'Riwayat aktivitas user dari login sampai logout']
       masterstatus: ['Status Bug Report', 'Master data status bug report'],
       activitylog: ['Activity Log', 'Riwayat aktivitas user dari login sampai logout']
     };
@@ -139,7 +129,6 @@ const App = {
     if (page === 'summary') Summary.render();
     if (page === 'report') ReportModule.render();
     if (page === 'masterstatus') MasterStatusModule.render();
-    if (page === 'activitylog') ActivityLogModule.render();
     if (page === 'activitylog') ActivityLogModule.render();
 
     document.getElementById('sidebar').classList.remove('open');

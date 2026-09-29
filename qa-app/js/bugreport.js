@@ -103,9 +103,7 @@ const BugReportModule = {
 
   filtered(){
     const { search, filters, sortKey, sortDir, activeFileId } = this.ui;
-    const { search, filters, sortKey, sortDir, activeFileId } = this.ui;
     let rows = this.all().filter(b => {
-      if (activeFileId && b.fileId !== activeFileId) return false;
       if (activeFileId && b.fileId !== activeFileId) return false;
       if (search){
         const hay = `${bugCode(b)} ${b.module} ${b.title} ${b.tester} ${b.testCaseId||''} ${b.description||''} ${b.steps||''} ${b.expectedResult||''} ${b.actualResult||''}`.toLowerCase();
@@ -163,27 +161,7 @@ const BugReportModule = {
     const pageRows = rows.slice(start, start + this.ui.pageSize);
 
     const isBoard = this.ui.view === 'board';
-    const isBoard = this.ui.view === 'board';
     document.getElementById('bugEmptyState').style.display = total ? 'none' : 'flex';
-    if (!total){
-      const searchingNow = !!this.ui.search || Object.values(this.ui.filters).some(Boolean);
-      document.getElementById('bugEmptyGlyph').textContent = searchingNow ? '🔍' : '🐞';
-      document.getElementById('bugEmptyTitle').textContent = searchingNow ? 'Data tidak ditemukan' : 'Belum ada Bug Report';
-      document.getElementById('bugEmptyDesc').textContent = searchingNow ? 'Coba kata kunci atau filter lain.' : 'Buat bug baru, atau klik "Create Bug" pada Test Case berstatus Failed.';
-      document.getElementById('bugEmptyAddBtn').style.display = searchingNow ? 'none' : (Auth.can('bugreport_create') ? '' : 'none');
-    }
-    document.getElementById('bugTableWrap').style.display = (total && !isBoard) ? 'block' : 'none';
-    document.getElementById('bugTableFooter').style.display = isBoard ? 'none' : 'flex';
-    document.getElementById('bugBoardWrap').style.display = (isBoard && total) ? 'flex' : 'none';
-    if (isBoard){
-      if (total) this.renderBoard(rows);
-      const bulkBar = document.getElementById('bugBulkBar');
-      bulkBar.style.display = 'none';
-      return;
-    }
-
-    const canEdit = Auth.can('bugreport_update') || Auth.can('bugreport_updateStatusPriority');
-    const canDelete = Auth.can('bugreport_delete');
     if (!total){
       const searchingNow = !!this.ui.search || Object.values(this.ui.filters).some(Boolean);
       document.getElementById('bugEmptyGlyph').textContent = searchingNow ? '🔍' : '🐞';
@@ -209,8 +187,6 @@ const BugReportModule = {
     bulkBar.querySelector('.count').textContent = this.ui.selected.size;
     document.getElementById('bugBulkDeleteBtn').style.display = canDelete ? '' : 'none';
     document.getElementById('bugBulkStatusSelect').style.display = canEdit ? '' : 'none';
-    document.getElementById('bugBulkDeleteBtn').style.display = canDelete ? '' : 'none';
-    document.getElementById('bugBulkStatusSelect').style.display = canEdit ? '' : 'none';
     document.getElementById('bugTableBody').innerHTML = pageRows.map(b => `
       <tr class="row-clickable" data-id="${b.id}">
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
@@ -223,12 +199,6 @@ const BugReportModule = {
         <td>${escapeHtml(b.tester || '-')}</td>
         <td>${formatDate(b.reportDate)}</td>
         <td class="cell-actions">
-          ${actionMenu(`
-            <button data-act="view" data-id="${b.id}">👁 Lihat Detail</button>
-            ${canEdit ? `<button data-act="edit" data-id="${b.id}">✎ Edit</button>` : ''}
-            <button data-act="print" data-id="${b.id}">🖨 Print</button>
-            ${canDelete ? `<button class="danger" data-act="del" data-id="${b.id}">🗑 Delete</button>` : ''}
-          `)}
           ${actionMenu(`
             <button data-act="view" data-id="${b.id}">👁 Lihat Detail</button>
             ${canEdit ? `<button data-act="edit" data-id="${b.id}">✎ Edit</button>` : ''}
@@ -600,8 +570,6 @@ const BugReportModule = {
         const { act, id } = btn.dataset;
         if (act === 'view') this.openDetail(id);
         if (act === 'edit') this.openForm(id);
-        if (act === 'view') this.openDetail(id);
-        if (act === 'edit') this.openForm(id);
         if (act === 'del') this.remove(id);
         if (act === 'print') this.printOne(id);
       };
@@ -612,13 +580,6 @@ const BugReportModule = {
      - bugId set => editing existing bug
      - prefillTestCaseId set (from "Create Bug" on a Failed test case) => new bug pre-linked */
   openForm(bugId = null, prefillTestCaseId = null){
-    const bug = bugId ? this.all().find(b => b.id === bugId) : null;
-    const canFull = Auth.can('bugreport_update');
-    const canLimited = Auth.can('bugreport_updateStatusPriority');
-    if (!bug && !Auth.can('bugreport_create')){ Toast.show('Tidak punya izin membuat Bug Report.', 'error'); return; }
-    if (bug && !canFull && !canLimited){ Toast.show('Tidak punya izin mengedit Bug Report.', 'error'); return; }
-    this.ui.limitedEdit = !!(bug && !canFull && canLimited);
-
     const bug = bugId ? this.all().find(b => b.id === bugId) : null;
     const canFull = Auth.can('bugreport_update');
     const canLimited = Auth.can('bugreport_updateStatusPriority');
@@ -641,9 +602,6 @@ const BugReportModule = {
     document.getElementById('bugFieldDate').value = bug ? formatDate(bug.reportDate) : formatDate(todayISO());
 
     if (bug){
-      f.module.value = bug.module || ''; f.scenario.value = bug.scenario || '';
-      f.expectedResultRef.value = bug.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(bug.steps || '');
-      this.setTestCase(bug.testCaseId || null, true);
       f.module.value = bug.module || ''; f.scenario.value = bug.scenario || '';
       f.expectedResultRef.value = bug.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(bug.steps || '');
       this.setTestCase(bug.testCaseId || null, true);
@@ -721,72 +679,14 @@ const BugReportModule = {
     });
   },
 
-  /* Limited editors (bugreport_updateStatusPriority without full bugreport_update)
-     can only change Status & Priority — every other field is disabled. */
-  applyFormFieldLock(){
-    const f = document.getElementById('bugForm');
-    const keepEnabled = ['status', 'priority'];
-    Array.from(f.elements).forEach(el => {
-      if (!el.name) return;
-      el.disabled = this.ui.limitedEdit && !keepEnabled.includes(el.name);
-    });
-  },
-
-  /* ---- Test Case combobox (searchable, replaces a plain <select> so long
-     test case lists stay usable) ---- */
-  setTestCase(tcId, silent = false){
-    document.getElementById('bugTestCaseSelect').value = tcId || '';
-    const label = document.getElementById('bugTestCaseTriggerText');
-    const tc = tcId ? App.state.testcases.find(t => t.id === tcId) : null;
-    label.textContent = tc ? `${tc.id} — ${tc.scenario.slice(0,60)}` : '— Tidak terkait Test Case —';
-    label.classList.toggle('text-faint', !tc);
-    this.fillFromTestCase(tcId, silent);
-  },
-  renderTestCaseList(query){
-    const listEl = document.getElementById('bugTestCaseList');
-    const q = query.trim().toLowerCase();
-    const all = App.state.testcases;
-    const filtered = q ? all.filter(t => t.id.toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
-    const noneItem = `<div class="dropdown-item combobox-option" data-tc="">— Tidak terkait Test Case —</div>`;
-    if (!filtered.length){
-      listEl.innerHTML = noneItem + `<div class="combobox-empty"><p>Test case tidak ditemukan.</p></div>`;
-    } else {
-      listEl.innerHTML = noneItem + filtered.map(t => `<div class="dropdown-item combobox-option" data-tc="${escapeHtml(t.id)}">${escapeHtml(t.id)} — ${escapeHtml(t.scenario||'').slice(0,60)}</div>`).join('');
-    }
-    listEl.querySelectorAll('[data-tc]').forEach(el => {
-      el.addEventListener('click', () => {
-        this.setTestCase(el.dataset.tc || null);
-        document.getElementById('bugTestCaseDropdown').classList.remove('open');
-      });
-    });
-  },
-  openTestCaseCombobox(){
-    document.getElementById('bugTestCaseSearch').value = '';
-    this.renderTestCaseList('');
-  },
-
-  /* When a Test Case is linked, Module/Scenario/Steps/Expected Result are
-     locked to that Test Case's data. Without one, they're free text so a
-     standalone bug can still be reported. */
-  lockAutoFields(locked){
-    const f = document.getElementById('bugForm');
-    ['module','scenario','stepsRef','expectedResultRef'].forEach(name => { f[name].readOnly = locked; });
-    ['bugModuleField','bugScenarioField','bugStepsField','bugExpectedField'].forEach(id => {
-      document.getElementById(id).classList.toggle('readonly', locked);
-    });
-  },
-
   fillFromTestCase(tcId, silent = false){
     const f = document.getElementById('bugForm');
     const tc = App.state.testcases.find(t => t.id === tcId);
     if (!tc){
       this.lockAutoFields(false);
-      this.lockAutoFields(false);
       return;
     }
     f.module.value = tc.module; f.scenario.value = tc.scenario;
-    f.expectedResultRef.value = tc.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(tc.steps || '');
-    this.lockAutoFields(true);
     f.expectedResultRef.value = tc.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(tc.steps || '');
     this.lockAutoFields(true);
     if (!silent) Toast.show('Field Test Case otomatis terisi.', 'info', { duration: 1800 });
@@ -798,7 +698,6 @@ const BugReportModule = {
     const data = {
       testCaseId: f.testCaseId.value || null,
       module: f.module.value, scenario: f.scenario.value,
-      expectedResult: f.expectedResultRef.value, steps: textToStepsHtml(f.stepsRef.value), tester: f.tester.value.trim(),
       expectedResult: f.expectedResultRef.value, steps: textToStepsHtml(f.stepsRef.value), tester: f.tester.value.trim(),
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
@@ -849,13 +748,11 @@ const BugReportModule = {
 
   async bulkDelete(){
     if (!this.ui.selected.size || !Auth.can('bugreport_delete')) return;
-    if (!this.ui.selected.size || !Auth.can('bugreport_delete')) return;
     const ids = [...this.ui.selected];
     const ok = await confirmDialog('Hapus Bug Terpilih?', `${ids.length} bug akan dihapus.`);
     if (!ok) return;
     const removed = App.state.bugs.filter(b => ids.includes(b.id));
     App.state.bugs = App.state.bugs.filter(b => !ids.includes(b.id));
-    ActivityLog.record('bugreport_delete', `${ids.length} bug dihapus (bulk)`);
     ActivityLog.record('bugreport_delete', `${ids.length} bug dihapus (bulk)`);
     App.saveBugs(); this.ui.selected.clear(); this.render();
     Toast.show(`${ids.length} bug dihapus.`, 'info', { undo: () => { App.state.bugs.push(...removed); App.saveBugs(); this.render(); } });
@@ -899,7 +796,6 @@ const BugReportModule = {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Bug Reports');
     XLSX.writeFile(wb, `BugReports_${todayISO()}.xlsx`);
-    ActivityLog.record('bugreport_export', `${rows.length} bug di-export ke Excel`);
     ActivityLog.record('bugreport_export', `${rows.length} bug di-export ke Excel`);
     Toast.show('Export Excel Bug Report berhasil.', 'success');
   },
@@ -1045,8 +941,6 @@ const BugReportModule = {
     f.addEventListener('submit', e => this.submitForm(e));
     document.getElementById('bugTestCaseTrigger').addEventListener('click', () => this.openTestCaseCombobox());
     document.getElementById('bugTestCaseSearch').addEventListener('input', e => this.renderTestCaseList(e.target.value));
-    document.getElementById('bugTestCaseTrigger').addEventListener('click', () => this.openTestCaseCombobox());
-    document.getElementById('bugTestCaseSearch').addEventListener('input', e => this.renderTestCaseList(e.target.value));
 
     document.getElementById('bugSearchInput').addEventListener('input', debounce(e => this.setSearch(e.target.value), 200));
     document.getElementById('bugSelectAll').addEventListener('change', e => {
@@ -1061,7 +955,6 @@ const BugReportModule = {
       });
     });
     document.getElementById('bugFilterResetBtn').addEventListener('click', () => this.resetFilters());
-    document.getElementById('bugFilterResetBtn').addEventListener('click', () => this.resetFilters());
     document.querySelectorAll('#bugTable thead th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const key = th.dataset.key;
@@ -1071,51 +964,6 @@ const BugReportModule = {
     });
     document.getElementById('bugBulkDeleteBtn').addEventListener('click', () => this.bulkDelete());
     document.getElementById('bugBulkStatusSelect').addEventListener('change', e => { this.bulkUpdateStatus(e.target.value); e.target.value=''; });
-
-    document.getElementById('bugExportExcelBtn').addEventListener('click', () => this.exportExcel());
-    document.getElementById('bugExportCsvBtn').addEventListener('click', () => this.exportCSV());
-    document.getElementById('bugImportTemplateBtn').addEventListener('click', () => this.downloadImportTemplate());
-    document.getElementById('bugImportTemplateBtn2').addEventListener('click', () => this.downloadImportTemplate());
-
-    const importOverlay = document.getElementById('bugImportModalOverlay');
-    const importDz = document.getElementById('bugImportDropzone');
-    const importInput = document.getElementById('bugImportFileInput');
-    const importPending = document.getElementById('bugImportPending');
-    const importConfirmBtn = document.getElementById('bugImportConfirmBtn');
-    let pendingFile = null;
-
-    const stageFile = (file) => {
-      if (!file) return;
-      pendingFile = file;
-      document.getElementById('bugImportFileName').textContent = file.name;
-      document.getElementById('bugImportFileSize').textContent = `${(file.size / 1024).toFixed(1)} KB`;
-      importDz.style.display = 'none';
-      importPending.style.display = 'block';
-      importConfirmBtn.style.display = 'inline-flex';
-    };
-    const resetImportModal = () => {
-      pendingFile = null;
-      importDz.style.display = 'flex';
-      importPending.style.display = 'none';
-      importConfirmBtn.style.display = 'none';
-    };
-
-    document.getElementById('bugImportBtn').addEventListener('click', () => { resetImportModal(); importOverlay.classList.add('active'); });
-    document.getElementById('bugImportCancelBtn').addEventListener('click', resetImportModal);
-    importDz.addEventListener('click', () => importInput.click());
-    importInput.addEventListener('change', e => { stageFile(e.target.files[0]); e.target.value = ''; });
-    ['dragenter','dragover'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.add('dragover'); }));
-    ['dragleave','drop'].forEach(evt => importDz.addEventListener(evt, e => { e.preventDefault(); importDz.classList.remove('dragover'); }));
-    importDz.addEventListener('drop', e => stageFile(e.dataTransfer.files[0]));
-    importConfirmBtn.addEventListener('click', () => {
-      if (!pendingFile) return;
-      this.importFile(pendingFile);
-      importOverlay.classList.remove('active');
-      resetImportModal();
-    });
-    document.querySelectorAll('#bugImportModalOverlay [data-close]').forEach(btn => {
-      btn.addEventListener('click', () => importOverlay.classList.remove('active'));
-    });
 
     document.getElementById('bugExportExcelBtn').addEventListener('click', () => this.exportExcel());
     document.getElementById('bugExportCsvBtn').addEventListener('click', () => this.exportCSV());
