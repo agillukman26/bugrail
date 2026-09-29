@@ -9,6 +9,8 @@ const UserManagementModule = {
   render(){
     if (!Auth.can('usermanagement')){
       document.getElementById('page-usermanagement').innerHTML = `<p class="text-faint" style="padding:24px 0; text-align:center;">Anda tidak punya akses ke halaman ini.</p>`;
+    if (!Auth.can('usermanagement')){
+      document.getElementById('page-usermanagement').innerHTML = `<p class="text-faint" style="padding:24px 0; text-align:center;">Anda tidak punya akses ke halaman ini.</p>`;
       return;
     }
     this.renderUsers();
@@ -36,6 +38,7 @@ const UserManagementModule = {
         `)}</td>
       </tr>
     `).join('') : `<tr><td colspan="4" class="text-faint" style="font-size:12.5px;">Belum ada user.</td></tr>`;
+    `).join('') : `<tr><td colspan="4" class="text-faint" style="font-size:12.5px;">Belum ada user.</td></tr>`;
     body.querySelectorAll('[data-edit-user]').forEach(btn => {
       btn.onclick = () => this.startEditUser(btn.dataset.editUser);
     });
@@ -53,6 +56,7 @@ const UserManagementModule = {
 
   startCreateUser(){
     this.resetUserForm();
+    this.refreshWorkspaceSelect();
     this.refreshWorkspaceSelect();
     this.openUserModal();
   },
@@ -114,6 +118,7 @@ const UserManagementModule = {
       user.workspaceId = workspaceIds[0] || null;
       App.saveSettings();
       ActivityLog.record('user_update', `User ${email} diperbarui`);
+      ActivityLog.record('user_update', `User ${email} diperbarui`);
       this.resetUserForm();
       this.closeUserModal();
       this.renderUsers();
@@ -127,6 +132,7 @@ const UserManagementModule = {
 
     users.push({ email, password, role, workspaceIds, workspaceId: workspaceIds[0] || null }); // workspaceId: see note above
     App.saveSettings();
+    ActivityLog.record('user_create', `User ${email} dibuat`);
     ActivityLog.record('user_create', `User ${email} dibuat`);
     this.resetUserForm();
     this.closeUserModal();
@@ -148,6 +154,7 @@ const UserManagementModule = {
     if (!ok) return;
     App.state.settings.users = users.filter(u => u !== user);
     App.saveSettings();
+    ActivityLog.record('user_delete', `User ${user.email} dihapus`);
     ActivityLog.record('user_delete', `User ${user.email} dihapus`);
     if (this.editingEmail === user.email) this.resetUserForm();
     this.renderUsers();
@@ -398,6 +405,8 @@ const UserManagementModule = {
   bindStaticEvents(){
     document.getElementById('settUserRole').innerHTML = Auth.ROLES.map(r => `<option value="${r.value}">${escapeHtml(r.label)}</option>`).join('');
     this.refreshWorkspaceSelect();
+    document.getElementById('settUserRole').innerHTML = Auth.ROLES.map(r => `<option value="${r.value}">${escapeHtml(r.label)}</option>`).join('');
+    this.refreshWorkspaceSelect();
     document.getElementById('settUserCreateBtn').addEventListener('click', () => this.startCreateUser());
     document.getElementById('settUserSaveBtn').addEventListener('click', () => this.saveUser());
     const userModal = document.getElementById('userFormModalOverlay');
@@ -421,12 +430,34 @@ const UserManagementModule = {
       btn.addEventListener('click', () => this.resetWorkspaceForm());
     });
     wsModal.addEventListener('click', e => { if (e.target === wsModal) this.resetWorkspaceForm(); });
+
+    document.getElementById('rolePermCreateBtn').addEventListener('click', () => this.startCreateRole());
+    document.getElementById('roleFormSaveBtn').addEventListener('click', () => this.saveRole());
+    const roleModal = document.getElementById('roleFormModalOverlay');
+    roleModal.querySelectorAll('[data-close]').forEach(btn => {
+      btn.addEventListener('click', () => this.resetRoleForm());
+    });
+    roleModal.addEventListener('click', e => { if (e.target === roleModal) this.resetRoleForm(); });
+
+    document.getElementById('workspaceCreateBtn').addEventListener('click', () => this.startCreateWorkspace());
+    document.getElementById('workspaceFormSaveBtn').addEventListener('click', () => this.saveWorkspace());
+    const wsModal = document.getElementById('workspaceFormModalOverlay');
+    wsModal.querySelectorAll('[data-close]').forEach(btn => {
+      btn.addEventListener('click', () => this.resetWorkspaceForm());
+    });
+    wsModal.addEventListener('click', e => { if (e.target === wsModal) this.resetWorkspaceForm(); });
   }
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   UserManagementModule.bindStaticEvents();
   const origGoTo = App.goTo.bind(App);
+  App.goTo = (page) => {
+    origGoTo(page);
+    if (page === 'usermanagement') UserManagementModule.render();
+    if (page === 'rolepermission') UserManagementModule.renderRolePermissions();
+    if (page === 'workspace') UserManagementModule.renderWorkspaces();
+  };
   App.goTo = (page) => {
     origGoTo(page);
     if (page === 'usermanagement') UserManagementModule.render();
