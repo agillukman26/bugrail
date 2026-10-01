@@ -883,7 +883,31 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
   body.sidebar-collapsed .ws-switcher-btn{justify-content:center; padding:6px 0; border-color:transparent;}
   body.sidebar-collapsed .ws-menu{left:calc(100% - 4px); right:auto; top:12px; width:220px;}
 }
-.modal-header-actions{display:flex; align-items:center; gap:8px;}
+/* Bug ID as a link (Jira-style): right-click to copy, ctrl/middle-click for a new tab */
+a.bug-key{color:var(--primary); text-decoration:none; font-weight:700;}
+a.bug-key:hover{text-decoration:underline;}
+/* Bug report form */
+.field[hidden], .form-row[hidden]{display:none;}
+/* Optional section, collapsed by default (native <details>) */
+.form-collapse{margin-bottom:6px;}
+.form-collapse > summary{cursor:pointer; user-select:none; list-style:none;}
+.form-collapse > summary::-webkit-details-marker{display:none;}
+.form-collapse > summary::before{content:'▸ '; display:inline-block; width:1em;}
+.form-collapse[open] > summary::before{content:'▾ ';}
+.field-label-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.tc-copy-check{display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--text-dim); cursor:pointer; user-select:none;}
+.tc-copy-check[hidden]{display:none;}
+.tc-copy-check input{width:auto; margin:0;}
+/* Copied from the test case: locked, but full-contrast text so it's easy to read / copy */
+.field textarea.tc-locked{background:var(--surface-alt); color:var(--text); cursor:text;}
+.field-hint{font-size:11.5px; color:var(--text-faint); margin:0;}
+.field-error{font-size:12px; color:var(--status-failed); margin:0;}
+.bug-similar{font-size:12.5px; color:var(--text-dim); background:var(--primary-soft); border-radius:var(--radius-s); padding:8px 10px;}
+.bug-similar[hidden]{display:none;}
+/* Footer stays visible while the long form scrolls (.modal has 24px padding) */
+.modal-footer-sticky{position:sticky; bottom:-24px; margin:18px -24px -24px; padding:14px 24px 24px; background:var(--surface); z-index:2;}
+/* Bug detail shown as its own page (#bug= link) instead of a popup */
+.modal.as-page{max-width:1100px; max-height:none; margin:0 auto; box-shadow:none;}
 /* Page size (segmented, same metrics as .pagination buttons) */
 .pager-right{display:flex; align-items:center; justify-content:flex-end; gap:16px; flex-wrap:wrap;}
 .flex-between:has(> .pager-right){margin-top:14px; align-items:center; gap:12px; flex-wrap:wrap;}
@@ -895,3 +919,4 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A93A6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center;}
 .page-size select:hover{border-color:var(--text-faint);}
 .page-size select:focus-visible{outline:none; border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-soft);}
+.combobox-trigger:disabled{background:var(--surface-alt); color:var(--text-faint); cursor:not-allowed;}

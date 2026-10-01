@@ -65,5 +65,21 @@ function makeEnv(server){
   await ok.S.set('qa_testcases', [{ id: 'A' }]);
   assert.ok(!ok.S.hasUnsynced());
 
+  // 4) Booted offline (fresh browser, no real data): saves stay local and are NEVER
+  //    sent later — this is how a seed qa_settings once replaced the real one.
+  const real = { up: false, putStatus: 200, data: { qa_settings: { users: ['a', 'b'], workspaces: ['WS-1'] } } };
+  const offline = makeEnv(real);
+  await offline.S.hydrate();
+  await offline.S.set('qa_settings', { users: ['seed-admin'] });
+  real.up = true;
+  await offline.S.set('qa_settings', { users: ['seed-admin'], theme: 'dark' }); // server back mid-session: still local only
+  assert.deepStrictEqual(offline.puts, [], 'offline-boot session never PUTs');
+  const later = makeEnv(real);
+  Object.assign(later.ls, offline.ls);
+  await later.S.hydrate();
+  assert.deepStrictEqual(later.puts, [], 'nothing re-sent on the next online load');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(real.data.qa_settings)), { users: ['a', 'b'], workspaces: ['WS-1'] }, 'real settings untouched');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(later.S.get('qa_settings'))), { users: ['a', 'b'], workspaces: ['WS-1'] }, 'online load shows server data');
+
   console.log('storage.check.js: all checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -6,7 +6,6 @@
 
 const BugReportModule = {
   SEVERITY: ['Critical', 'High', 'Medium', 'Low'],
-  PRIORITY: ['Highest', 'High', 'Medium', 'Low'],
   /* Seed for Settings > Master > Status Bug Report (js/masterstatus.js) */
   DEFAULT_STATUS_MASTER: [
     { code: 'OPEN', name: 'Open', color: '#2563EB', order: 1 },
@@ -124,7 +123,7 @@ const BugReportModule = {
       }
       if (filters.module && b.module !== filters.module) return false;
       if (filters.severity && b.severity !== filters.severity) return false;
-      if (filters.priority && b.priority !== filters.priority) return false;
+      if (filters.priority && normPriority(b.priority) !== filters.priority) return false;
       if (filters.status && b.status !== filters.status) return false;
       if (filters.tester && b.tester !== filters.tester) return false;
       return true;
@@ -196,7 +195,7 @@ const BugReportModule = {
     document.getElementById('bugTableBody').innerHTML = pageRows.map(b => `
       <tr class="row-clickable" data-id="${b.id}">
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
-        <td class="mono">${escapeHtml(bugCode(b))}</td>
+        <td class="mono">${this.bugKeyLink(b)}</td>
         <td class="mono text-dim">${escapeHtml(this.tcLabel(b.testCaseId) || '-')}</td>
         <td class="truncate" title="${escapeHtml(b.title)}">${escapeHtml(b.title)}</td>
         <td class="truncate" title="${escapeHtml(b.module)}">${escapeHtml(b.module)}</td>
@@ -278,7 +277,7 @@ const BugReportModule = {
             ${items.map(b => `
               <div class="board-card" draggable="true" data-id="${b.id}">
                 <div class="board-card-top">
-                  <span class="mono text-dim" style="font-size:11px;">${escapeHtml(bugCode(b))}</span>
+                  <span class="mono" style="font-size:11px;">${this.bugKeyLink(b)}</span>
                   ${this.severityBadge(b.severity)}
                 </div>
                 <div class="board-card-title">${escapeHtml(b.title)}</div>
@@ -290,6 +289,7 @@ const BugReportModule = {
       `;
     }).join('');
 
+    this.bindBugKeyLinks(wrap);
     wrap.querySelectorAll('.board-card').forEach(card => {
       card.addEventListener('click', () => this.openDetail(card.dataset.id));
       card.addEventListener('dragstart', e => {
@@ -315,12 +315,12 @@ const BugReportModule = {
     const bug = this.all().find(b => b.id === id);
     if (!bug || bug.status === status) return;
     const from = bug.status;
-    const change = await this.askStatusNote(`${bugCode(bug)}: ${from} → ${status}`);
+    const change = await this.confirmStatusChange([bug], status, `${bugCode(bug)}: ${from} → ${status}`);
     if (!change) return;
     this.logActivity(bug, bug.status, status, change);
     bug.status = status;
     App.saveBugs();
-    ActivityLog.record('bugreport_update', `Bug ${bugCode(bug)} status diubah dari ${from} ke ${status} (board): ${change.note}`);
+    ActivityLog.record('bugreport_update', `Bug ${bugCode(bug)} status diubah dari ${from} ke ${status} (board)${change.note ? `: ${change.note}` : ''}`);
     this.render();
   },
 
@@ -329,7 +329,27 @@ const BugReportModule = {
     bug.activity.push({ at: nowISO(), from, to, note: change.note, attachment: change.attachment || '', email: Auth.currentEmail() || 'unknown' });
   },
 
-  /* Every status change must carry a reason; attachment links are optional.
+  // Status name -> master code (OPEN, IN_PROGRESS, RETEST...); unknown names normalised the same way.
+  statusCode(name){
+    const m = this.statusMaster().find(s => s.name === name);
+    return String(m ? m.code : name || '').toUpperCase().replace(/\s+/g, '_');
+  },
+
+  /* Gate for every status change (board, form, bulk): enforces statusTransitionRule
+     (utils.js) and asks for a note only when a move needs one.
+     Resolves { note, attachment }, or null (with a toast) when blocked/cancelled. */
+  async confirmStatusChange(bugs, to, label){
+    const isQA = !Auth.isAdmin() && Auth.can('bugreport_statusQA');
+    const rules = bugs.filter(b => b.status !== to)
+      .map(b => statusTransitionRule(this.statusCode(b.status), this.statusCode(to), isQA));
+    if (rules.some(r => !r.ok)){
+      Toast.show('QA hanya bisa memindahkan status dari Retest ke Open, Blocked, Resolved, atau Closed.', 'error');
+      return null;
+    }
+    return rules.some(r => r.needNote) ? this.askStatusNote(label) : { note: '', attachment: '' };
+  },
+
+  /* Reason (required) + optional attachment links for a status change.
      Resolves { note, attachment }, or null (with a toast) when cancelled. */
   askStatusNote(label){
     return new Promise(resolve => {
@@ -379,8 +399,10 @@ const BugReportModule = {
     return (bug.activity || []).filter(a => a.to === 'Reopened' || a.to === 'Retest').length;
   },
 
-  /* ---- Detail modal (read-only view + activity log + chat) ---- */
-  openDetail(id){
+  /* ---- Detail (read-only view + activity log + chat) ----
+     Popup from the list / board / reports; asPage (App.goTo('bugdetail'), from a
+     #bug= link) moves the same box into its own page instead. */
+  openDetail(id, asPage = false){
     const bug = this.all().find(b => b.id === id);
     if (!bug) return;
     this.ui.detailId = id;
@@ -388,7 +410,8 @@ const BugReportModule = {
     document.querySelectorAll('#bugChatTabs .bug-chat-tab').forEach(el => {
       el.classList.toggle('active', el.dataset.chatTab === 'comment');
     });
-    document.getElementById('bugDetailTitle').textContent = `Detail Bug — ${bugCode(bug)}`;
+    // In the popup the ID opens the full page; on the page it's there to copy.
+    document.getElementById('bugDetailTitle').innerHTML = `Detail Bug — ${this.bugKeyLink(bug)}`;
 
     /* Content blocks (description/steps/results) read like a document, so they
        live in the main column as titled cards. Short facts (status, severity,
@@ -413,10 +436,12 @@ const BugReportModule = {
       <div class="bug-detail-grid">
         <div class="bug-detail-main">
           <h3 class="bug-detail-title">${escapeHtml(bug.title)}</h3>
-          ${block('Description', escapeHtml(bug.description || '-'))}
-          ${block('Steps to Reproduce', bug.steps || '-')}
+          ${bug.preconditions ? block('Pre-condition', escapeHtml(bug.preconditions)) : ''}
+          ${bug.testData ? block('Test Data', escapeHtml(bug.testData)) : ''}
+          ${block('Steps to Reproduce', safeStepsHtml(bug.steps) || '-')}
           ${block('Expected Result', escapeHtml(bug.expectedResult || '-'))}
           ${block('Actual Result', escapeHtml(bug.actualResult || '-'))}
+          ${block('Impact / Catatan Tambahan', escapeHtml(bug.description || '-'))}
           ${attachmentsHtml ? block('Attachment', attachmentsHtml) : ''}
         </div>
         <div class="bug-detail-side">
@@ -426,7 +451,9 @@ const BugReportModule = {
           ${sideField('Priority', escapeHtml(bug.priority))}
           ${sideField('Module', escapeHtml(bug.module || '-'))}
           ${sideField('Tester', escapeHtml(bug.tester || '-'))}
-          ${sideField('Assign ke', escapeHtml(bug.assignee || '-'))}
+          ${sideField('Assignee', escapeHtml(bug.assignee || '-'))}
+          ${sideField('Environment', escapeHtml([bug.environment, bug.buildVersion].filter(Boolean).join(' · ') || '-'))}
+          ${sideField('Platform', escapeHtml([bug.platform, bug.os, bug.browser, bug.device].filter(Boolean).join(' · ') || '-'))}
           ${sideField('Report Date', bug.reportDate ? formatDate(bug.reportDate) : '-')}
           ${sideField('Jumlah Retest', retestCount ? `${retestCount}x (Reopened)` : 'Belum pernah')}
         </div>
@@ -434,8 +461,36 @@ const BugReportModule = {
 
     this.renderChat(bug);
     document.getElementById('bugChatSendBtn').onclick = () => this.addComment(bug.id);
-    document.getElementById('bugCopyLinkBtn').onclick = () => this.copyLink(bug);
-    document.getElementById('bugDetailModalOverlay').classList.add('active');
+    const overlay = document.getElementById('bugDetailModalOverlay');
+    const box = this._detailBox || (this._detailBox = overlay.querySelector('.modal'));
+    box.classList.toggle('as-page', asPage);
+    // Close / Tutup: the popup just hides (generic [data-close]); the page goes back to the list.
+    box.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = asPage ? () => App.goTo('bugreport') : null; });
+    if (asPage){
+      document.getElementById('page-bugdetail').appendChild(box);
+      overlay.classList.remove('active');
+    } else {
+      if (App.state.currentPage === 'bugdetail') App.goTo('bugreport'); // e.g. global search: don't leave an empty page behind
+      overlay.appendChild(box);
+      overlay.classList.add('active');
+    }
+  },
+
+  /* Bug ID as a real link to its detail page (Jira-style): right-click → copy link,
+     ctrl/middle-click → new tab. */
+  bugKeyLink(bug){
+    return `<a class="bug-key" href="${escapeHtml(App.bugLink(bug))}" draggable="false" data-bug-key="${escapeHtml(bug.id)}">${escapeHtml(bugCode(bug))}</a>`;
+  },
+  // In the list / board a plain click opens the popup, not the page.
+  bindBugKeyLinks(root){
+    root.querySelectorAll('a[data-bug-key]').forEach(a => {
+      a.onclick = e => {
+        e.stopPropagation();
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return; // browser opens it in a new tab/window
+        e.preventDefault();
+        this.openDetail(a.dataset.bugKey);
+      };
+    });
   },
 
   setChatTab(tab, bug){
@@ -452,7 +507,7 @@ const BugReportModule = {
     const list = document.getElementById('bugChatList');
     const tab = this.ui.chatTab;
     // Writing is only for the Comments tab; All / Activity are read-only timelines.
-    const composer = document.querySelector('#bugDetailModalOverlay .bug-chat-composer');
+    const composer = document.querySelector('.bug-chat-composer');
     if (composer) composer.style.display = tab === 'comment' ? '' : 'none';
     let feed = [
       ...(bug.activity || []).map(a => ({ type:'activity', at:a.at, from:a.from, to:a.to, note:a.note, attachment:a.attachment, email:a.email })),
@@ -480,17 +535,6 @@ const BugReportModule = {
       `;
     }).join('');
     list.scrollTop = list.scrollHeight;
-  },
-
-  // Link for follow-up: the developer logs in and lands on this bug (App.openDeepLink).
-  async copyLink(bug){
-    const link = App.bugLink(bug);
-    try{
-      await navigator.clipboard.writeText(link);
-      Toast.show(`Link ${bugCode(bug)} disalin — kirim ke developer.`, 'success');
-    }catch(e){
-      await promptDialog('Salin link bug', '', link, 'Tutup'); // clipboard blocked: show it to copy by hand
-    }
   },
 
   addComment(id){
@@ -571,6 +615,7 @@ const BugReportModule = {
     document.querySelectorAll('#bugTableBody tr[data-id]').forEach(tr => {
       tr.onclick = e => { if (!e.target.closest('input, button, a, .dropdown')) this.openDetail(tr.dataset.id); };
     });
+    this.bindBugKeyLinks(document.getElementById('bugTableBody'));
     document.querySelectorAll('.bug-row-check').forEach(cb => {
       cb.onchange = () => { cb.checked ? this.ui.selected.add(cb.dataset.id) : this.ui.selected.delete(cb.dataset.id); this.render(); };
     });
@@ -588,6 +633,17 @@ const BugReportModule = {
   /* ---- Form: openForm(bugId, prefillTestCaseId) ----
      - bugId set => editing existing bug
      - prefillTestCaseId set (from "Create Bug" on a Failed test case) => new bug pre-linked */
+  TC_FIELDS: ['module', 'scenario', 'preconditions', 'testData'],               // auto-filled, stay editable
+  TC_COPIES: { useTcSteps: 'stepsRef', useTcExpected: 'expectedResultRef' },    // "Dari test case" checkbox -> textarea
+
+  // <select> options; a value from old data that's no longer in the list stays selectable.
+  fillSelect(select, options, selected = '', placeholder = ''){
+    const list = [...options];
+    if (selected && !list.includes(selected)) list.push(selected);
+    select.innerHTML = (placeholder ? `<option value="">${escapeHtml(placeholder)}</option>` : '') +
+      list.map(v => `<option value="${escapeHtml(v)}" ${v === selected ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+  },
+
   openForm(bugId = null, prefillTestCaseId = null){
     const bug = bugId ? this.all().find(b => b.id === bugId) : null;
     const canFull = Auth.can('bugreport_update');
@@ -597,9 +653,13 @@ const BugReportModule = {
     this.ui.limitedEdit = !!(bug && !canFull && canLimited);
 
     this.ui.editingId = bugId;
+    this.ui.formTcId = null;
+    this.ui.tcEdited = new Set(); // TC_FIELDS the tester typed in — a test case never overwrites them
     const f = document.getElementById('bugForm');
     f.reset();
-    f.assignee.innerHTML = Auth.userOptions(bugId ? (this.all().find(b => b.id === bugId) || {}).assignee : '');
+    this.clearFormErrors();
+    document.getElementById('bugSimilarInfo').hidden = true;
+    f.assignee.innerHTML = Auth.userOptions(bug ? bug.assignee : '');
     if (bug) this.ui.activeFileId = bug.fileId;
     else if (prefillTestCaseId){
       const tc = App.state.testcases.find(t => t.id === prefillTestCaseId);
@@ -608,30 +668,57 @@ const BugReportModule = {
 
     document.getElementById('bugModalTitle').textContent = bug ? `Edit Bug — ${bugCode(bug)}` : 'Buat Bug Report';
     document.getElementById('bugFieldId').value = bug ? bugCode(bug) : '(auto generate, nomor per workspace)';
-    document.getElementById('bugFieldDate').value = bug ? formatDate(bug.reportDate) : formatDate(todayISO());
+    document.getElementById('bugFieldDate').value = formatDateTime(bug ? bug.reportDate : nowISO());
+
+    this.fillSelect(f.priority, BUG_FORM.PRIORITIES, bug ? bug.priority : 'Medium');
+    this.fillSelect(f.environment, BUG_FORM.ENVIRONMENTS, bug ? bug.environment : '', '— Pilih Environment —');
+    // Bugs saved before Platform existed: infer it from Browser / Device (not written back until saved).
+    const platform = bug ? (bug.platform || (bug.device && !bug.browser ? 'Mobile App' : bug.browser ? 'Web' : '')) : '';
+    this.fillSelect(f.platform, BUG_FORM.PLATFORMS, platform, '— Pilih Platform —');
 
     if (bug){
-      f.module.value = bug.module || ''; f.scenario.value = bug.scenario || '';
-      f.expectedResultRef.value = bug.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(bug.steps || '');
-      this.setTestCase(bug.testCaseId || null, true);
-      f.title.value = bug.title; f.description.value = bug.description;
+      this.TC_FIELDS.forEach(name => { f[name].value = bug[name] || ''; this.ui.tcEdited.add(name); }); // the bug's own snapshot
+      f.stepsRef.value = stepsHtmlToText(bug.steps || ''); f.expectedResultRef.value = bug.expectedResult || '';
+      f.title.value = bug.title || ''; f.description.value = bug.description || '';
       f.actualResult.value = bug.actualResult || '';
-      f.severity.value = bug.severity; f.priority.value = bug.priority;
+      f.severity.value = bug.severity;
       f.status.innerHTML = this.statusOptions(bug.status);
-      f.environment.value = bug.environment || ''; f.browser.value = bug.browser || '';
-      f.os.value = bug.os || ''; f.device.value = bug.device || ''; f.buildVersion.value = bug.buildVersion || '';
+      f.browser.value = bug.browser || ''; f.os.value = bug.os || ''; f.device.value = bug.device || '';
+      f.buildVersion.value = bug.buildVersion || '';
       f.attachments.value = bug.attachments || ''; f.tester.value = bug.tester || '';
+      // Optional Environment section starts collapsed; open it when the bug already has data there.
+      document.getElementById('bugEnvSection').open = [bug.environment, bug.buildVersion, platform, bug.os, bug.browser, bug.device].some(Boolean);
+      this.applyTestCase(bug.testCaseId || null, { restore: { useTcSteps: !!bug.useTcSteps, useTcExpected: !!bug.useTcExpected } });
     } else {
-      f.severity.value = 'Medium'; f.priority.value = 'Medium';
+      f.severity.value = 'Medium';
       f.status.innerHTML = this.statusOptions(); // first status in master order
       f.tester.value = Auth.currentEmail() || '';
-      this.setTestCase(prefillTestCaseId || null, true);
+      document.getElementById('bugEnvSection').open = false;
+      this.applyTestCase(prefillTestCaseId || null);
     }
+    // Already linked to a test case (editing a linked bug, or "Create Bug" from a
+    // test case): lock the picker so the link — and the fields it filled — can't change.
+    const trigger = document.getElementById('bugTestCaseTrigger');
+    trigger.disabled = !!(bug ? bug.testCaseId : prefillTestCaseId);
+    trigger.title = trigger.disabled ? 'Test case sudah terkait dan tidak bisa diganti' : '';
+    document.getElementById('bugTestCaseDropdown').classList.remove('open'); // don't carry an open picker over from the last form
     this.applyFormFieldLock();
+    // A new bug always starts at the first status of the lifecycle.
+    if (!bug){ f.status.disabled = true; f.status.title = 'Bug baru selalu mulai dari status ini'; }
+    this.updatePlatformFields();
     this.render();
+    this.ui.formSnapshot = this.formSnapshot();
     document.getElementById('bugModalOverlay').classList.add('active');
   },
   closeForm(){ document.getElementById('bugModalOverlay').classList.remove('active'); },
+  formSnapshot(){
+    return JSON.stringify([...document.getElementById('bugForm').elements].filter(el => el.name).map(el => el.type === 'checkbox' ? el.checked : el.value));
+  },
+  // Batal / ✕: ask before throwing away what was typed.
+  async requestCloseForm(){
+    if (this.formSnapshot() !== this.ui.formSnapshot && !(await confirmDialog('Buang perubahan?', 'Isian form bug report yang belum disimpan akan hilang.', 'Buang'))) return;
+    this.closeForm();
+  },
 
   /* Limited editors (bugreport_updateStatusPriority without full bugreport_update)
      can only change Status & Priority — every other field is disabled. */
@@ -644,21 +731,22 @@ const BugReportModule = {
     });
   },
 
+  // Browser only for Web, Device only for Mobile App.
+  updatePlatformFields(){
+    const show = BUG_FORM.conditionalFields(document.getElementById('bugForm').platform.value);
+    document.getElementById('bugBrowserField').hidden = !show.browser;
+    document.getElementById('bugDeviceField').hidden = !show.device;
+    document.getElementById('bugPlatformDetailRow').hidden = !show.browser && !show.device;
+  },
+
   /* ---- Test Case combobox (searchable, replaces a plain <select> so long
      test case lists stay usable) ---- */
-  setTestCase(tcId, silent = false){
-    document.getElementById('bugTestCaseSelect').value = tcId || '';
-    const label = document.getElementById('bugTestCaseTriggerText');
-    const tc = tcId ? App.state.testcases.find(t => t.id === tcId) : null;
-    label.textContent = tc ? `${tcCode(tc)} — ${tc.scenario.slice(0,60)}` : '— Tidak terkait Test Case —';
-    label.classList.toggle('text-faint', !tc);
-    this.fillFromTestCase(tcId, silent);
-  },
+  setTestCase(tcId){ this.applyTestCase(tcId, { silent: false }); },
   renderTestCaseList(query){
     const listEl = document.getElementById('bugTestCaseList');
     const q = query.trim().toLowerCase();
     const all = App.state.testcases;
-    const filtered = q ? all.filter(t => tcCode(t).toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
+    const filtered = q ? all.filter(t => tcCode(t).toLowerCase().includes(q) || (t.scenario||'').toLowerCase().includes(q) || (t.testCase||'').toLowerCase().includes(q) || (t.module||'').toLowerCase().includes(q)) : all;
     const noneItem = `<div class="dropdown-item combobox-option" data-tc="">— Tidak terkait Test Case —</div>`;
     if (!filtered.length){
       listEl.innerHTML = noneItem + `<div class="combobox-empty"><p>Test case tidak ditemukan.</p></div>`;
@@ -677,70 +765,174 @@ const BugReportModule = {
     this.renderTestCaseList('');
   },
 
-  /* When a Test Case is linked, Module/Scenario/Steps/Expected Result are
-     locked to that Test Case's data. Without one, they're free text so a
-     standalone bug can still be reported. */
-  lockAutoFields(locked){
+  // The test case's value for a form field, as plain text.
+  tcValue(tc, name){
+    if (!tc) return '';
+    if (name === 'stepsRef') return stepsHtmlToText(tc.steps || '');
+    if (name === 'expectedResultRef') return String(tc.expectedResult || '');
+    return String(tc[name] || '');
+  },
+
+  /* Apply the chosen test case (or none) to the form:
+     - Module / Scenario / Pre-condition / Test Data are filled unless the tester
+       already typed in them; clearing the test case leaves them as they are.
+     - Steps / Expected Result follow their "Dari test case" checkbox: shown only
+       when the test case has that data, ticked (filled + locked) when it first
+       appears; a test case change only refreshes a ticked one.
+     restore = saved checkbox states when opening an existing bug: its saved text
+     is shown as-is (a snapshot), never refreshed from the test case. */
+  applyTestCase(tcId, { restore = null, silent = true } = {}){
     const f = document.getElementById('bugForm');
-    ['module','scenario','stepsRef','expectedResultRef'].forEach(name => { f[name].readOnly = locked; });
-    ['bugModuleField','bugScenarioField','bugStepsField','bugExpectedField'].forEach(id => {
-      document.getElementById(id).classList.toggle('readonly', locked);
+    const tc = tcId ? App.state.testcases.find(t => t.id === tcId) : null;
+    document.getElementById('bugTestCaseSelect').value = tc ? tc.id : '';
+    const label = document.getElementById('bugTestCaseTriggerText');
+    label.textContent = tc ? `${tcCode(tc)} — ${(tc.scenario || '').slice(0,60)}` : '— Tidak terkait Test Case —';
+    label.classList.toggle('text-faint', !tc);
+    this.ui.formTcId = tc ? tc.id : null;
+
+    if (tc && !restore) this.TC_FIELDS.forEach(name => { if (!this.ui.tcEdited.has(name)) f[name].value = this.tcValue(tc, name); });
+    Object.entries(this.TC_COPIES).forEach(([flag, name]) => {
+      const box = f[flag], wrap = box.closest('.tc-copy-check'), el = f[name];
+      const src = this.tcValue(tc, name);
+      const wasHidden = wrap.hidden;
+      wrap.hidden = !src;
+      el.placeholder = tc && !src ? `Test case ini tidak memiliki ${flag === 'useTcSteps' ? 'test steps' : 'expected result'}` : (el.dataset.placeholder || '');
+      if (!src){ box.checked = false; this.setCopyLocked(name, false); return; }
+      if (restore){ box.checked = restore[flag]; this.setCopyLocked(name, box.checked); return; }
+      if (wasHidden || box.checked){ box.checked = true; this.copyFromTestCase(name, src); }
+    });
+    this.refreshTcHints();
+    if (tc && !silent) Toast.show('Field Test Case otomatis terisi.', 'info', { duration: 1800 });
+  },
+  setCopyLocked(name, locked){
+    const el = document.getElementById('bugForm')[name];
+    el.readOnly = locked;
+    el.classList.toggle('tc-locked', locked);
+    // Locked text can still be selected / copied; only the checkbox unlocks it.
+    el.title = locked ? 'Hilangkan centang "Dari test case" untuk mengedit' : '';
+  },
+  // Puts the test case's text in the textarea (locked); overwriting different text can be undone.
+  copyFromTestCase(name, src){
+    const f = document.getElementById('bugForm'), el = f[name];
+    const flag = Object.keys(this.TC_COPIES).find(k => this.TC_COPIES[k] === name);
+    const prev = el.value;
+    el.value = src;
+    this.setCopyLocked(name, true);
+    if (prev.trim() && prev !== src){
+      Toast.show('Diganti dengan data dari test case', 'info', { duration: 5000, undo: () => {
+        el.value = prev; f[flag].checked = false; this.setCopyLocked(name, false);
+      } });
+    }
+  },
+  // "Diubah dari test case" under an auto-filled field whose text differs from the linked test case.
+  refreshTcHints(){
+    const f = document.getElementById('bugForm');
+    const tc = App.state.testcases.find(t => t.id === this.ui.formTcId);
+    this.TC_FIELDS.forEach(name => {
+      f[name].closest('.field').querySelector('.field-hint').hidden = !(tc && f[name].value !== this.tcValue(tc, name));
     });
   },
 
-  fillFromTestCase(tcId, silent = false){
+  // "Bug serupa ditemukan": open bugs in the visible workspace with a similar title (never blocks saving).
+  showSimilar(){
+    const f = document.getElementById('bugForm'), box = document.getElementById('bugSimilarInfo');
+    const closed = this.STATUS.filter(s => this.statusCode(s) === 'CLOSED');
+    const matches = BUG_FORM.similar(f.title.value, this.all().filter(b => b.id !== this.ui.editingId), closed.length ? closed : ['Closed']).slice(0, 3);
+    box.hidden = !matches.length;
+    box.innerHTML = matches.map(b => `Bug serupa ditemukan: ${this.bugKeyLink(b)} — ${escapeHtml(b.title)}`).join('<br>');
+    this.bindBugKeyLinks(box);
+  },
+
+  clearFormErrors(){
     const f = document.getElementById('bugForm');
-    const tc = App.state.testcases.find(t => t.id === tcId);
-    if (!tc){
-      this.lockAutoFields(false);
-      return;
-    }
-    f.module.value = tc.module; f.scenario.value = tc.scenario;
-    f.expectedResultRef.value = tc.expectedResult || ''; f.stepsRef.value = stepsHtmlToText(tc.steps || '');
-    this.lockAutoFields(true);
-    if (!silent) Toast.show('Field Test Case otomatis terisi.', 'info', { duration: 1800 });
+    f.querySelectorAll('.field-error').forEach(el => el.remove());
+    f.querySelectorAll('.input-invalid').forEach(el => el.classList.remove('input-invalid'));
+  },
+  // One message under each invalid field, then scroll to the first.
+  showFormErrors(errors){
+    this.clearFormErrors();
+    let first = null;
+    Object.entries(errors).forEach(([key, msg]) => {
+      const field = document.querySelector(`#bugForm [data-field="${key}"]`);
+      if (!field) return;
+      const control = field.querySelector('input:not([type="checkbox"]), textarea, select');
+      if (control) control.classList.add('input-invalid');
+      const p = document.createElement('p');
+      p.className = 'field-error';
+      p.textContent = msg;
+      field.appendChild(p);
+      if (!first) first = control || field;
+    });
+    if (first){ first.scrollIntoView({ block: 'center', behavior: 'smooth' }); first.focus({ preventScroll: true }); }
   },
 
   async submitForm(e){
     e.preventDefault();
+    if (this.ui.saving) return; // no double submit
     const f = e.target;
+    const creating = !this.ui.editingId;
+    const show = BUG_FORM.conditionalFields(f.platform.value);
+    const linked = !!f.testCaseId.value;
     const data = {
       testCaseId: f.testCaseId.value || null,
-      module: f.module.value, scenario: f.scenario.value,
-      expectedResult: f.expectedResultRef.value, steps: textToStepsHtml(f.stepsRef.value), tester: f.tester.value.trim(),
+      module: f.module.value.trim(), scenario: f.scenario.value.trim(),
+      preconditions: f.preconditions.value.trim(), testData: f.testData.value.trim(),
+      // Snapshot text, not a reference: editing the test case later doesn't change the bug.
+      steps: textToStepsHtml(f.stepsRef.value), expectedResult: f.expectedResultRef.value.trim(),
+      useTcSteps: linked && f.useTcSteps.checked, useTcExpected: linked && f.useTcExpected.checked,
+      tester: f.tester.value.trim(),
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
-      environment: f.environment.value.trim(), browser: f.browser.value.trim(),
-      os: f.os.value.trim(), device: f.device.value.trim(), buildVersion: f.buildVersion.value.trim(),
+      environment: f.environment.value, buildVersion: f.buildVersion.value.trim(),
+      platform: f.platform.value, os: f.os.value.trim(),
+      // A new bug doesn't keep Browser / Device its platform doesn't use.
+      browser: (show.browser || !creating) ? f.browser.value.trim() : '',
+      device: (show.device || !creating) ? f.device.value.trim() : '',
       attachments: f.attachments.value.trim(),
       assignee: f.assignee.value
     };
-    if (!data.title || !data.actualResult){
-      Toast.show('Bug Title dan Actual Result wajib diisi.', 'error'); return;
-    }
-    if (this.ui.editingId){
-      const idx = App.state.bugs.findIndex(b => b.id === this.ui.editingId);
-      const prev = App.state.bugs[idx];
-      let change = null;
-      if (prev.status !== data.status){
-        change = await this.askStatusNote(`${bugCode(prev)}: ${prev.status} → ${data.status}`);
-        if (!change) return; // form stays open so nothing typed is lost
-        this.logActivity(prev, prev.status, data.status, change);
+    const errors = this.ui.limitedEdit ? {} : BUG_FORM.errors({ ...data, steps: f.stepsRef.value }, creating);
+    if (Object.keys(errors).length){ this.showFormErrors(errors); return; }
+
+    const btn = document.getElementById('bugFormSubmitBtn');
+    this.ui.saving = true; btn.disabled = true; btn.textContent = 'Menyimpan…';
+    try{
+      if (!creating){
+        const idx = App.state.bugs.findIndex(b => b.id === this.ui.editingId);
+        const prev = App.state.bugs[idx];
+        let change = null;
+        if (prev.status !== data.status){
+          change = await this.confirmStatusChange([prev], data.status, `${bugCode(prev)}: ${prev.status} → ${data.status}`);
+          if (!change) return; // form stays open so nothing typed is lost
+          this.logActivity(prev, prev.status, data.status, change);
+        }
+        Auth.logAssignment(prev, prev.assignee, data.assignee);
+        App.state.bugs[idx] = { ...prev, ...data };
+        await App.saveBugs();
+        ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}${change.note ? `: ${change.note}` : ''})` : ''}`);
+        Toast.show(`Bug ${bugCode(prev)} diperbarui.`, 'success');
+      } else {
+        const bug = { id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, reportDate: nowISO() };
+        Auth.logAssignment(bug, '', data.assignee);
+        App.state.bugs.push(bug);
+        const saved = await App.saveBugs();
+        if (!saved && Storage.serverOnline){
+          // Rejected by the server (validation / no access; Storage already showed why): drop it, keep the form.
+          App.state.bugs.splice(App.state.bugs.indexOf(bug), 1);
+          App.saveBugs();
+          return;
+        }
+        // Offline / network drop: kept locally and re-sent by Storage — the bug isn't lost.
+        ActivityLog.record('bugreport_create', `Bug ${bug.code} dibuat`);
+        // TODO: notify the workspace QA Lead when severity is Critical — there's no QA Lead role yet and the
+        // bell (notifications.js) only derives events from bug data; the assignee is already notified.
+        Toast.show(`Bug report ${bug.code} berhasil dibuat`, 'success');
       }
-      Auth.logAssignment(prev, prev.assignee, data.assignee);
-      App.state.bugs[idx] = { ...prev, ...data };
-      ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}: ${change.note})` : ''}`);
-      Toast.show(`Bug ${bugCode(prev)} diperbarui.`, 'success');
-    } else {
-      const bug = { id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, reportDate: nowISO() };
-      Auth.logAssignment(bug, '', data.assignee);
-      App.state.bugs.push(bug);
-      ActivityLog.record('bugreport_create', `Bug ${bug.code} dibuat`);
-      Toast.show(`Bug ${bug.code} dibuat.`, 'success');
+      this.closeForm();
+      this.render();
+    } finally {
+      this.ui.saving = false; btn.disabled = false; btn.textContent = 'Simpan Bug Report';
     }
-    App.saveBugs();
-    this.closeForm();
-    this.render();
   },
 
   async remove(id){
@@ -769,7 +961,7 @@ const BugReportModule = {
 
   async bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status) return;
-    const change = await this.askStatusNote(`${this.ui.selected.size} bug → ${status}`);
+    const change = await this.confirmStatusChange(this.all().filter(b => this.ui.selected.has(b.id)), status, `${this.ui.selected.size} bug → ${status}`);
     if (!change) return;
     let changed = 0;
     App.state.bugs.forEach(b => {
@@ -780,7 +972,7 @@ const BugReportModule = {
       }
     });
     App.saveBugs(); this.render();
-    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk): ${change.note}`);
+    if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)${change.note ? `: ${change.note}` : ''}`);
     Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
   },
 
@@ -794,10 +986,11 @@ const BugReportModule = {
   exportExcel(){
     const rows = this.filtered().map(b => ({
       'Bug ID': bugCode(b), 'Test Case ID': this.tcLabel(b.testCaseId), Module: b.module,
-      Scenario: b.scenario, 'Bug Title': b.title, Description: b.description,
+      Scenario: b.scenario, 'Pre-condition': b.preconditions || '', 'Test Data': b.testData || '',
+      'Bug Title': b.title, 'Impact / Catatan Tambahan': b.description,
       'Expected Result': b.expectedResult, 'Actual Result': b.actualResult,
       Severity: b.severity, Priority: b.priority, Status: b.status, Tester: b.tester,
-      Date: formatDate(b.reportDate), Environment: b.environment, Browser: b.browser, OS: b.os,
+      Date: formatDate(b.reportDate), Environment: b.environment, Platform: b.platform || '', Browser: b.browser, OS: b.os, Device: b.device || '',
       Attachment: b.attachments || '',
       'Build Version': b.buildVersion
     }));
@@ -812,10 +1005,11 @@ const BugReportModule = {
     const cols = [
       {key:'code',label:'Bug ID'},{key:'testCaseId',label:'Test Case ID'},{key:'module',label:'Module'},
       {key:'scenario',label:'Scenario'},{key:'title',label:'Bug Title'},
-      {key:'description',label:'Description'},{key:'expectedResult',label:'Expected Result'},
+      {key:'preconditions',label:'Pre-condition'},{key:'testData',label:'Test Data'},
+      {key:'description',label:'Impact / Catatan Tambahan'},{key:'expectedResult',label:'Expected Result'},
       {key:'actualResult',label:'Actual Result'},{key:'severity',label:'Severity'},{key:'priority',label:'Priority'},
       {key:'status',label:'Status'},{key:'tester',label:'Tester'},{key:'reportDate',label:'Date'},
-      {key:'environment',label:'Environment'},{key:'browser',label:'Browser'},{key:'os',label:'OS'},
+      {key:'environment',label:'Environment'},{key:'platform',label:'Platform'},{key:'browser',label:'Browser'},{key:'os',label:'OS'},{key:'device',label:'Device'},
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
     downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b), testCaseId: this.tcLabel(b.testCaseId) })), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
@@ -979,6 +1173,24 @@ const BugReportModule = {
     });
     const f = document.getElementById('bugForm');
     f.addEventListener('submit', e => this.submitForm(e));
+    document.getElementById('bugFormCancelBtn').addEventListener('click', () => this.requestCloseForm());
+    document.getElementById('bugFormCloseX').addEventListener('click', () => this.requestCloseForm());
+    f.addEventListener('input', e => {
+      const field = e.target.closest('[data-field]');
+      if (field){ field.querySelectorAll('.field-error').forEach(el => el.remove()); e.target.classList.remove('input-invalid'); }
+      if (this.TC_FIELDS.includes(e.target.name)){ this.ui.tcEdited.add(e.target.name); this.refreshTcHints(); }
+    });
+    f.platform.addEventListener('change', () => this.updatePlatformFields());
+    f.title.addEventListener('input', debounce(() => this.showSimilar(), 500));
+    Object.entries(this.TC_COPIES).forEach(([flag, name]) => {
+      const el = f[name];
+      el.dataset.placeholder = el.placeholder;
+      f[flag].addEventListener('change', () => {
+        const tc = App.state.testcases.find(t => t.id === this.ui.formTcId);
+        if (f[flag].checked) this.copyFromTestCase(name, this.tcValue(tc, name));
+        else this.setCopyLocked(name, false); // the copied text stays as a starting point
+      });
+    });
     document.getElementById('bugTestCaseTrigger').addEventListener('click', () => this.openTestCaseCombobox());
     document.getElementById('bugTestCaseSearch').addEventListener('input', e => this.renderTestCaseList(e.target.value));
 

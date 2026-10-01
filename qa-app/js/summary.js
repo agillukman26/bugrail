@@ -147,8 +147,8 @@ const Summary = {
             ['Critical','High','Medium','Low'].map(s => bugs.filter(b=>b.severity===s).length),
             ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'sumDonutSeverity')}
           ${this.donutCard('Distribusi Priority', bugs.length, 'Total Bug',
-            ['Highest','High','Medium','Low'],
-            ['Highest','High','Medium','Low'].map(p => bugs.filter(b=>b.priority===p).length),
+            BUG_FORM.PRIORITIES,
+            BUG_FORM.PRIORITIES.map(p => bugs.filter(b=>normPriority(b.priority)===p).length),
             ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'sumDonutPriority')}
           ${this.bugPerFileCard()}
         </div>
@@ -157,7 +157,7 @@ const Summary = {
 
     const sevCounts = ['Critical','High','Medium','Low'].map(s => bugs.filter(b=>b.severity===s).length);
     this.donut('sumDonutSeverity', sevCounts, ['#B0203A','#D64550','#D98A2B','#4E88C7']);
-    const prioCounts = ['Highest','High','Medium','Low'].map(p => bugs.filter(b=>b.priority===p).length);
+    const prioCounts = BUG_FORM.PRIORITIES.map(p => bugs.filter(b=>normPriority(b.priority)===p).length);
     this.donut('sumDonutPriority', prioCounts, ['#B0203A','#D64550','#D98A2B','#4E88C7']);
 
     this._lastData = { total, passed, failed, blocked, notrun, retest, passRate, failRate, bugs, tcs: { totalModules } };

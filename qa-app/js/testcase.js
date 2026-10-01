@@ -169,6 +169,7 @@ const TestCaseModule = {
     document.getElementById('tcAddBtn').style.display = canCreate ? '' : 'none';
     document.getElementById('tcEmptyAddBtn').style.display = canCreate ? '' : 'none';
     document.getElementById('tcImportBtn').style.display = canCreate ? '' : 'none';
+    document.getElementById('tcImportTemplateMenuBtn').style.display = canCreate ? '' : 'none';
 
     const body = document.getElementById('tcTableBody');
     const bulkBar = document.getElementById('tcBulkBar');
@@ -551,7 +552,7 @@ const TestCaseModule = {
           <h3 class="bug-detail-title">${escapeHtml(tc.scenario || '-')}</h3>
           ${block('Test Case', escapeHtml(tc.testCase || '-'))}
           ${block('Pre Kondisi', escapeHtml(tc.preconditions || '-'))}
-          ${block('Test Step', tc.steps || '-')}
+          ${block('Test Step', safeStepsHtml(tc.steps) || '-')}
           ${block('Test Data', escapeHtml(tc.testData || '-'))}
           ${block('Expected Result', escapeHtml(tc.expectedResult || '-'))}
           ${block('Actual Result', escapeHtml(tc.actualResult || '-'))}
@@ -886,6 +887,7 @@ const TestCaseModule = {
 
     document.getElementById('tcImportBtn').addEventListener('click', () => { resetImportModal(); importOverlay.classList.add('active'); });
     document.getElementById('tcImportTemplateBtn').addEventListener('click', () => ImportPage.downloadTemplate());
+    document.getElementById('tcImportTemplateMenuBtn').addEventListener('click', () => ImportPage.downloadTemplate());
     document.getElementById('tcImportCancelBtn').addEventListener('click', resetImportModal);
     importDz.addEventListener('click', () => importInput.click());
     importInput.addEventListener('change', e => { stageFile(e.target.files[0]); e.target.value = ''; });

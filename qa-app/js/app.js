@@ -70,7 +70,7 @@ const App = {
     this.saveBugs();
   },
   saveTestcases(){ Storage.set(STORAGE_KEYS.TESTCASES, this.state.testcases); this.onDataChanged(); },
-  saveBugs(){ Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); },
+  saveBugs(){ const saved = Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); return saved; },
   saveFiles(){ Storage.set(STORAGE_KEYS.FILES, this.state.files); },
   saveActivityLog(){ Storage.set(STORAGE_KEYS.ACTIVITY_LOG, this.state.activityLog); },
   saveSettings(){ Storage.set(STORAGE_KEYS.SETTINGS, this.state.settings); },
@@ -89,7 +89,8 @@ const App = {
      BugRail pages instead of leaving the app (and losing an unsaved form). */
   goTo(page, { fromHistory = false, replace = false } = {}){
     if (!fromHistory){
-      const url = location.href.split('#')[0];
+      // The bug detail page keeps its #bug= link in the address bar (reload / share reopens it).
+      const url = location.href.split('#')[0] + (page === 'bugdetail' ? `#bug=${encodeURIComponent(BugReportModule.ui.detailId)}` : '');
       if (replace || !history.state) history.replaceState({ page }, '', url);
       else if (history.state.page !== page) history.pushState({ page }, '', url);
     }
@@ -97,7 +98,8 @@ const App = {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
     const pageEl = document.getElementById(`page-${page}`);
-    const navEl = document.querySelector(`.nav-item[data-page="${page}"], .nav-subitem[data-page="${page}"]`);
+    const navPage = page === 'bugdetail' ? 'bugreport' : page;
+    const navEl = document.querySelector(`.nav-item[data-page="${navPage}"], .nav-subitem[data-page="${navPage}"]`);
     if (pageEl) pageEl.classList.add('active');
     if (navEl){
       navEl.classList.add('active');
@@ -115,6 +117,7 @@ const App = {
       dashboard: ['Dashboard', 'Ringkasan status pengujian & bug secara realtime'],
       testcase: ['Test Case', 'Kelola skenario pengujian'],
       bugreport: ['Bug Report', 'Laporan bug terintegrasi dengan Test Case'],
+      bugdetail: ['Bug Report', 'Detail bug'],
       summary: ['Summary', 'Rekap progres testing & bug'],
       report: ['Report', 'Analisa kesiapan go-live untuk PM & BA'],
       importexport: ['Import & Export', 'Import Test Case, export data, backup & restore'],
@@ -132,6 +135,7 @@ const App = {
     if (page === 'dashboard') Dashboard.render();
     if (page === 'testcase') TestCaseModule.render();
     if (page === 'bugreport') BugReportModule.render();
+    if (page === 'bugdetail') BugReportModule.openDetail(BugReportModule.ui.detailId, true);
     if (page === 'summary') Summary.render();
     if (page === 'report') ReportModule.render();
     if (page === 'masterstatus') MasterStatusModule.render();
@@ -360,7 +364,7 @@ const App = {
      and importexport (no gate) are checked separately in canAccessPage(). */
   PAGE_PERMISSIONS: {
     dashboard: 'dashboard', summary: 'summary', report: 'report', testcase: 'testcase_read',
-    bugreport: 'bugreport_read', masterstatus: 'master', usermanagement: 'usermanagement', settings: 'settings',
+    bugreport: 'bugreport_read', bugdetail: 'bugreport_read', masterstatus: 'master', usermanagement: 'usermanagement', settings: 'settings',
     activitylog: 'activitylog'
   },
   canAccessPage(page){
@@ -401,7 +405,9 @@ const App = {
   openDeepLink(){
     const id = this.deepLinkBugId();
     if (!id) return false;
-    history.replaceState(history.state, '', location.href.split('#')[0]); // consume: reload won't reopen it
+    // Back/Forward onto the detail page also fires hashchange — it's already showing.
+    if (this.state.currentPage === 'bugdetail' && BugReportModule.ui.detailId === id) return true;
+    history.replaceState(history.state, '', location.href.split('#')[0]); // goTo('bugdetail') puts it back
     const bug = this.state.bugs.find(b => b.id === id);
     if (!bug){ Toast.show('Bug dari link tidak ditemukan atau sudah dihapus.', 'error'); return true; }
     const file = this.state.files.find(f => f.id === bug.fileId);
@@ -414,8 +420,9 @@ const App = {
       this.onWorkspaceChanged();
     }
     this.goTo('bugreport');
-    if (bug.fileId) BugReportModule.openFile(bug.fileId);
-    BugReportModule.openDetail(bug.id);
+    if (bug.fileId) BugReportModule.openFile(bug.fileId); // Back from the detail page lands on its file
+    BugReportModule.ui.detailId = bug.id;
+    this.goTo('bugdetail');
     return true;
   },
 

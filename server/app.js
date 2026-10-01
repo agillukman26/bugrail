@@ -104,8 +104,71 @@ async function validateFilesWrite(req, res, next){
   }
 }
 
+// A qa_settings write must keep every top-level key already stored (users,
+// workspaces, roles, rolePermissions, bugStatusMaster...). A client that booted
+// without the real settings (offline fallback, empty browser storage) would
+// otherwise replace them with its seed defaults — this once wiped every account
+// and workspace. Clearing a list is still fine: send it as [] / {}.
+async function validateSettingsWrite(req, res, next){
+  const value = req.body.value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)){
+    return res.status(400).json({ error: 'qa_settings harus berupa object' });
+  }
+  try {
+    const conn = await db.getDb();
+    const row = await conn.collection('kv_store').findOne({ _id: 'qa_settings' });
+    const stored = (row && row.value && typeof row.value === 'object') ? row.value : {};
+    const missing = Object.keys(stored).filter(k => !(k in value));
+    if (missing.length){
+      return res.status(409).json({ error: `Settings ditolak: akan menghapus ${missing.join(', ')} di server. Muat ulang halaman.` });
+    }
+    next();
+  } catch (err) {
+    console.error('validateSettingsWrite failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+}
+
+// qa_bugs is PUT whole too — only police bugs this write ADDS (ids not stored yet):
+// title + actual result present, and (non-admin) the bug's file belongs to the
+// writer's workspace, is shared into it, or is legacy (no workspace).
+// The full form rules (qa-app/js/utils.js BUG_FORM) stay client-side: Excel
+// import and bugs saved before those fields existed don't carry them.
+async function validateBugsWrite(req, res, next){
+  const { role, workspace } = readClientAuth(req);
+  const bugs = Array.isArray(req.body.value) ? req.body.value : null;
+  if (!bugs) return res.status(400).json({ error: 'qa_bugs harus berupa array' });
+  try {
+    const conn = await db.getDb();
+    const row = await conn.collection('kv_store').findOne({ _id: 'qa_bugs' });
+    const known = new Set(((row && Array.isArray(row.value)) ? row.value : []).map(b => b.id));
+    const added = bugs.filter(b => b && !known.has(b.id));
+    if (!added.length) return next();
+    const text = v => String(v == null ? '' : v).trim();
+    for (const b of added){
+      const title = text(b.title).length;
+      if (!title || title > 150) return res.status(400).json({ error: `Bug Title wajib diisi (maks. 150 karakter): ${b.code || b.id}` });
+      if (!text(b.actualResult)) return res.status(400).json({ error: `Actual Result wajib diisi: ${b.code || b.id}` });
+    }
+    if (role === 'admin') return next();
+    const filesRow = await conn.collection('kv_store').findOne({ _id: 'qa_files' });
+    const files = new Map(((filesRow && Array.isArray(filesRow.value)) ? filesRow.value : []).map(f => [f.id, f]));
+    for (const b of added){
+      const f = files.get(b.fileId);
+      const member = !f || !f.workspaceId || f.workspaceId === workspace || (f.sharedWith || []).includes(workspace);
+      if (!member) return res.status(403).json({ error: `Tidak berhak membuat bug di workspace lain: ${b.code || b.id}` });
+    }
+    next();
+  } catch (err) {
+    console.error('validateBugsWrite failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+}
+
 app.put('/api/kv/:key', async (req, res, next) => {
   if (req.params.key === 'qa_files') return validateFilesWrite(req, res, next);
+  if (req.params.key === 'qa_bugs') return validateBugsWrite(req, res, next);
+  if (req.params.key === 'qa_settings') return validateSettingsWrite(req, res, next);
   next();
 }, async (req, res) => {
   const { key } = req.params;
@@ -154,6 +217,10 @@ ${mode !== 'screenshot' ? `Content:\n${content}` : (content ? `Additional instru
 }
 
 app.post('/api/testforge/generate', async (req, res) => {
+  // Paused (server load) — the UI button is hidden too. Set TESTFORGE_ENABLED=1 in .env to turn it back on.
+  if (process.env.TESTFORGE_ENABLED !== '1') {
+    return res.status(503).json({ error: 'Fitur Generate AI sedang dinonaktifkan.' });
+  }
   try {
     if (isTestForgeRateLimited(req.ip)) {
       return res.status(429).json({ error: 'Too many requests, coba lagi nanti.' });
