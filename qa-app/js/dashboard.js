@@ -22,7 +22,7 @@ const Dashboard = {
       high: count(bugs,'severity','High'),
       medium: count(bugs,'severity','Medium'),
       low: count(bugs,'severity','Low'),
-      highest: count(bugs,'priority','Highest'),
+      highest: bugs.filter(b => normPriority(b.priority) === 'Urgent').length,
       prioHigh: count(bugs,'priority','High'),
       prioMedium: count(bugs,'priority','Medium'),
       prioLow: count(bugs,'priority','Low')
@@ -81,7 +81,7 @@ const Dashboard = {
             ['Critical','High','Medium','Low'], [s.critical,s.high,s.medium,s.low],
             ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'dashDonutSeverity')}
           ${this.donutCard('Distribusi Priority', s.totalBug, 'Total Bug',
-            ['Highest','High','Medium','Low'], [s.highest,s.prioHigh,s.prioMedium,s.prioLow],
+            ['Urgent','High','Medium','Low'], [s.highest,s.prioHigh,s.prioMedium,s.prioLow],
             ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'dashDonutPriority')}
         </div>
       </div>

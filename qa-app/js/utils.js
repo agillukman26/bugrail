@@ -39,11 +39,16 @@ const Storage = {
   serverOnline: true,
   inflight: 0,  // PUTs not answered yet
   seq: {},      // per-key write counter, so an older reply can't clear a newer pending write
+  /* True when hydrate() fell back to localStorage. That data may be stale or a
+     fresh seed (new browser/origin), so this session never writes to the server —
+     re-sending it later once wiped the real qa_settings (users, workspaces, roles). */
+  offlineBoot: false,
   /* Keys whose latest local change hasn't been confirmed by the server (server
-     down, network cut, tab closed mid-request). Kept in localStorage so it
-     survives a reload; hydrate() re-sends them instead of letting the older
-     server copy overwrite them. */
-  UNSYNCED_KEY: 'qa_unsynced',
+     down, network cut, tab closed mid-request) during an online session. Kept in
+     localStorage so it survives a reload; hydrate() re-sends them instead of
+     letting the older server copy overwrite them. "_v2": markers left by the old
+     offline-boot behaviour are ignored instead of re-sent. */
+  UNSYNCED_KEY: 'qa_unsynced_v2',
   unsynced(){
     try{ return JSON.parse(localStorage.getItem(this.UNSYNCED_KEY)) || []; }catch(e){ return []; }
   },
@@ -56,13 +61,15 @@ const Storage = {
 
   async hydrate(){
     try{
-      const res = await fetch(`${API_BASE}/kv`, { signal: AbortSignal.timeout(5000) });
+      // Generous: the server's first MongoDB Atlas connect (DNS + TLS) can take several seconds.
+      const res = await fetch(`${API_BASE}/kv`, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.cache = await res.json();
       this.serverOnline = true;
     }catch(e){
       console.error('Storage.hydrate: API unreachable, falling back to localStorage', e);
       this.serverOnline = false;
+      this.offlineBoot = true;
       this.cache = {};
       Object.values(STORAGE_KEYS).forEach(key => {
         try{
@@ -70,7 +77,7 @@ const Storage = {
           if (raw) this.cache[key] = JSON.parse(raw);
         }catch(err){ console.error('Storage.hydrate: bad localStorage value', key, err); }
       });
-      Toast.show('Server database tidak terhubung — memakai data lokal (offline).', 'info');
+      Toast.show('Server database tidak terhubung — memakai data lokal (offline). Perubahan TIDAK dikirim ke server; muat ulang saat server kembali.', 'error');
       return;
     }
     const pending = this.unsynced();
@@ -93,6 +100,7 @@ const Storage = {
   set(key, value){
     this.cache[key] = value;
     try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ console.error('Storage.set: localStorage write failed', key, e); }
+    if (this.offlineBoot) return Promise.resolve(false); // local only — see offlineBoot
     this.markUnsynced(key, true);
     return this.push(key);
   },
@@ -160,6 +168,64 @@ function bindPageSize(selectId, module){
    never shown) and `code` = the BUG-0001 number people see, counted per
    workspace, so two workspaces may both have BUG-0001 without colliding. */
 function bugCode(b){ return (b && (b.code || b.id)) || ''; }
+/* Bug report form options + rules (ISO/IEC/IEEE 29119-3 / ISTQB defect report).
+   Pure — see qa-app/test/bugform.check.js. */
+const BUG_FORM = {
+  PLATFORMS: ['Web', 'Mobile App', 'Desktop', 'API'],
+  ENVIRONMENTS: ['Local', 'Development', 'Staging', 'UAT', 'Production'],
+  PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
+  // Browser only matters on Web, Device only on Mobile App.
+  conditionalFields(platform){ return { browser: platform === 'Web', device: platform === 'Mobile App' }; },
+  /* d: form values as plain text. full = create (every required field);
+     edit keeps the old minimum so legacy bugs can still be saved.
+     Returns { fieldName: message } — empty when valid. */
+  errors(d, full = true){
+    const e = {};
+    const len = v => String(v || '').trim().length;
+    const title = len(d.title);
+    if (title < 5 || title > 150) e.title = 'Bug Title wajib diisi, 5–150 karakter.';
+    if (len(d.actualResult) < 5) e.actualResult = 'Actual Result wajib diisi, minimal 5 karakter.';
+    if (len(d.description) > 2000) e.description = 'Maksimal 2000 karakter.';
+    const bad = String(d.attachments || '').split('\n').map(s => s.trim()).filter(Boolean).find(l => {
+      try{ return !/^https?:$/.test(new URL(l).protocol); }catch(err){ return true; }
+    });
+    if (bad) e.attachments = `Bukan URL http/https yang valid: ${bad.slice(0, 80)}`;
+    if (!full) return e;
+    if (!len(d.module)) e.module = 'Module wajib diisi.';
+    if (len(d.steps) < 10) e.steps = 'Steps to Reproduce wajib diisi, minimal 10 karakter.';
+    if (len(d.expectedResult) < 5) e.expectedResult = 'Expected Result wajib diisi, minimal 5 karakter.';
+    if (!len(d.severity)) e.severity = 'Pilih Severity.';
+    // Environment section (environment, build, platform, OS, browser, device) is optional.
+    return e;
+  },
+  /* Open bugs whose title looks like `title`: word overlap ≥ 60% of the shorter
+     title (words of 3+ letters), or one title contains the other. */
+  similar(title, bugs, closedStatuses = ['Closed']){
+    const words = s => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3));
+    const norm = s => String(s || '').trim().toLowerCase();
+    const t = norm(title), tw = words(title);
+    if (t.length < 5) return [];
+    return bugs.filter(b => !closedStatuses.includes(b.status)).filter(b => {
+      const o = norm(b.title);
+      if (!o) return false;
+      if (o.includes(t) || t.includes(o)) return true;
+      const ow = words(b.title), min = Math.min(tw.size, ow.size);
+      return min > 0 && [...tw].filter(w => ow.has(w)).length / min >= 0.6;
+    });
+  }
+};
+// Legacy priority values (form used "Critical", dashboard "Highest") read as the current top level.
+function normPriority(p){ return p === 'Highest' || p === 'Critical' ? 'Urgent' : p; }
+
+/* Bug status rules, by status code (Master Status). Dev flow Open / In Progress /
+   Retest moves freely without a note. QA (permission bugreport_statusQA) may only
+   take a bug out of Retest — to Open/Blocked/Resolved/Closed — always with a note.
+   Any other move needs a note. Returns { ok, needNote }. */
+function statusTransitionRule(from, to, isQA){
+  const DEV_FLOW = ['OPEN', 'IN_PROGRESS', 'RETEST'], QA_TARGETS = ['OPEN', 'BLOCKED', 'RESOLVED', 'CLOSED'];
+  if (isQA) return { ok: from === 'RETEST' && QA_TARGETS.includes(to), needNote: true };
+  return { ok: true, needNote: !(DEV_FLOW.includes(from) && DEV_FLOW.includes(to)) };
+}
 // Same split for test cases: `id` = internal key, `code` = LOG-0001 shown, numbered per workspace + module prefix.
 /* List sorting: the "id" column sorts by the number people see (not the random
    internal key), and numbers compare naturally so LOG-0002 < LOG-0010. */
@@ -523,6 +589,27 @@ function textToStepsHtml(raw){
     return '<ol>' + lines.map(l => `<li>${escapeHtml(l.replace(numberedRe, ''))}</li>`).join('') + '</ol>';
   }
   return lines.map(l => `<p>${escapeHtml(l)}</p>`).join('');
+}
+
+/* Steps HTML is shown as HTML, and textToStepsHtml passes text that already looks
+   like HTML straight through — so render it through an allowlist: only list /
+   paragraph / basic formatting tags survive, and every attribute except Quill's
+   list/indent markers is dropped (no on*=, href=javascript:, style...). Anything
+   else keeps just its text. */
+function safeStepsHtml(html){
+  const ALLOWED = new Set(['P', 'OL', 'UL', 'LI', 'BR', 'B', 'STRONG', 'I', 'EM', 'U']);
+  const KEEP_ATTRS = new Set(['class', 'data-list']);
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html || '');
+  const clean = node => [...node.childNodes].forEach(child => {
+    if (child.nodeType === 3) return;
+    if (child.nodeType !== 1 || ['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'TEMPLATE'].includes(child.tagName)){ child.remove(); return; }
+    clean(child);
+    if (!ALLOWED.has(child.tagName)){ child.replaceWith(...child.childNodes); return; }
+    [...child.attributes].forEach(a => { if (!KEEP_ATTRS.has(a.name)) child.removeAttribute(a.name); });
+  });
+  clean(tpl.content);
+  return tpl.innerHTML;
 }
 
 function stripHtml(html){

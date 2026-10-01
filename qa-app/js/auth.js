@@ -49,6 +49,7 @@ const Auth = {
     { key: 'bugreport_updateStatusPriority', label: 'Bug Report — Edit Status/Priority saja' },
     { key: 'bugreport_delete', label: 'Bug Report — Hapus' },
     { key: 'bugreport_board', label: 'Bug Report — Board (drag & drop)' },
+    { key: 'bugreport_statusQA', label: 'Bug Report — Status QA (hanya dari Retest ke Open/Blocked/Resolved/Closed, wajib keterangan)' },
     { key: 'master', label: 'Master — Status Bug Report' },
     { key: 'usermanagement', label: 'User Management — Daftar User' },
     { key: 'settings', label: 'Settings' }
@@ -59,8 +60,8 @@ const Auth = {
      goes through this matrix (see can(), hardcoded to avoid self-lockout). */
   DEFAULT_ROLE_PERMISSIONS: {
     pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_updateStatusPriority: true },
-    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true },
-    qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true },
+    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true },
+    qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true },
     user_umum: { testcase_read: true, bugreport_read: true }
   },
 
