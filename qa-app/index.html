@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QA Test Management &amp; Bug Tracking</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐞</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=27">
+<link rel="stylesheet" href="css/style.css?v=28">
 <!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
      Core app + data storage still work fully offline once these have loaded once. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -848,7 +848,7 @@
         <div class="bug-similar" id="bugSimilarInfo" hidden></div>
       </div>
 
-      <div class="section-label">Terisi otomatis dari test case (bisa diisi manual bila tidak memilih test case)</div>
+      <!-- <div class="section-label">Terisi otomatis dari test case (bisa diisi manual bila tidak memilih test case)</div> -->
       <div class="field">
         <label>Test Case</label>
         <div class="dropdown combobox" id="bugTestCaseDropdown">
@@ -870,7 +870,7 @@
         <div class="field" data-field="testData"><label>Test Data</label><textarea name="testData" data-tc-src="testData"></textarea><p class="field-hint" hidden>Diubah dari test case</p></div>
       </div>
 
-      <div class="section-label">Diisi oleh tester</div>
+      <!-- <div class="section-label">Diisi oleh tester</div> -->
       <div class="form-row">
         <div class="field" data-field="steps">
           <div class="field-label-row">
@@ -888,9 +888,10 @@
         </div>
       </div>
       <div class="field" data-field="actualResult"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult"></textarea></div>
-      <div class="field" data-field="description"><label>Impact / Catatan Tambahan</label><textarea name="description" maxlength="2000"></textarea></div>
+      <!-- Hidden for now; kept in the form so editing an older bug keeps its saved description. -->
+      <div class="field" data-field="description" hidden><label>Impact / Catatan Tambahan</label><textarea name="description" maxlength="2000"></textarea></div>
 
-      <div class="section-label">Klasifikasi</div>
+      <!-- <div class="section-label">Klasifikasi</div> -->
       <div class="form-row">
         <div class="field" data-field="severity"><label>Severity <span class="req">*</span></label>
           <select name="severity"><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
@@ -898,29 +899,26 @@
         <div class="field"><label>Priority</label><select name="priority"></select></div>
       </div>
 
-      <details class="form-collapse" id="bugEnvSection">
-        <summary class="section-label">Environment (opsional)</summary>
-        <div class="form-row">
-          <div class="field" data-field="environment"><label>Environment</label><select name="environment"></select></div>
-          <div class="field" data-field="buildVersion"><label>Build Version</label><input name="buildVersion" placeholder="v1.2.3"></div>
-        </div>
-        <div class="form-row">
-          <div class="field" data-field="platform"><label>Platform</label><select name="platform"></select></div>
-          <div class="field" data-field="os"><label>OS</label><input name="os" placeholder="Android 14 / Windows 11"></div>
-        </div>
-        <div class="form-row" id="bugPlatformDetailRow">
-          <div class="field" data-field="browser" id="bugBrowserField"><label>Browser</label><input name="browser" placeholder="Chrome 126"></div>
-          <div class="field" data-field="device" id="bugDeviceField"><label>Device</label><input name="device" placeholder="Samsung A54"></div>
-        </div>
-      </details>
+      <div class="form-row">
+        <div class="field" data-field="environment"><label>Environment</label><select name="environment"></select></div>
+        <div class="field" data-field="buildVersion"><label>Build Version</label><input name="buildVersion" placeholder="v1.2.3"></div>
+      </div>
+      <div class="form-row">
+        <div class="field" data-field="platform"><label>Platform</label><select name="platform"></select></div>
+        <div class="field" data-field="os"><label>OS</label><input name="os" placeholder="Android 14 / Windows 11"></div>
+      </div>
+      <div class="form-row" id="bugPlatformDetailRow">
+        <div class="field" data-field="browser" id="bugBrowserField"><label>Browser</label><input name="browser" placeholder="Chrome 126"></div>
+        <div class="field" data-field="device" id="bugDeviceField"><label>Device</label><input name="device" placeholder="Samsung A54"></div>
+      </div>
 
-      <div class="section-label">Penugasan &amp; Status</div>
+      <!-- <div class="section-label">Penugasan &amp; Status</div> -->
       <div class="form-row">
         <div class="field"><label>Status</label><select name="status"></select></div>
         <div class="field"><label>Assignee</label><select name="assignee"></select></div>
       </div>
 
-      <div class="section-label">Bukti</div>
+      <div class="section-label">Evidence</div>
       <div class="field" data-field="attachments">
         <label>Link (Lightshot / Loom / Drive)</label>
         <textarea name="attachments" placeholder="Tempel link di sini, satu link per baris"></textarea>
@@ -1032,7 +1030,7 @@
 <script src="js/dashboard.js?v=18"></script>
 <script src="js/testcase.js?v=47"></script>
 <script src="js/testforge.js?v=3"></script>
-<script src="js/bugreport.js?v=52"></script>
+<script src="js/bugreport.js?v=55"></script>
 <script src="js/summary.js?v=19"></script>
 <script src="js/report.js?v=6"></script>
 <script src="js/notifications.js?v=3"></script>

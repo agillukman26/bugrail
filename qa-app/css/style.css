@@ -888,12 +888,6 @@ a.bug-key{color:var(--primary); text-decoration:none; font-weight:700;}
 a.bug-key:hover{text-decoration:underline;}
 /* Bug report form */
 .field[hidden], .form-row[hidden]{display:none;}
-/* Optional section, collapsed by default (native <details>) */
-.form-collapse{margin-bottom:6px;}
-.form-collapse > summary{cursor:pointer; user-select:none; list-style:none;}
-.form-collapse > summary::-webkit-details-marker{display:none;}
-.form-collapse > summary::before{content:'▸ '; display:inline-block; width:1em;}
-.form-collapse[open] > summary::before{content:'▾ ';}
 .field-label-row{display:flex; align-items:center; justify-content:space-between; gap:8px;}
 .tc-copy-check{display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--text-dim); cursor:pointer; user-select:none;}
 .tc-copy-check[hidden]{display:none;}
