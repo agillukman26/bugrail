@@ -441,7 +441,7 @@ const BugReportModule = {
           ${block('Steps to Reproduce', safeStepsHtml(bug.steps) || '-')}
           ${block('Expected Result', escapeHtml(bug.expectedResult || '-'))}
           ${block('Actual Result', escapeHtml(bug.actualResult || '-'))}
-          ${block('Impact / Catatan Tambahan', escapeHtml(bug.description || '-'))}
+          ${bug.description ? block('Impact / Catatan Tambahan', escapeHtml(bug.description)) : ''}
           ${attachmentsHtml ? block('Attachment', attachmentsHtml) : ''}
         </div>
         <div class="bug-detail-side">
@@ -514,6 +514,9 @@ const BugReportModule = {
       ...(bug.comments || []).map(c => ({ type:'comment', at:c.at, email:c.email, text:c.text }))
     ].sort((a,b) => new Date(a.at) - new Date(b.at));
     if (tab !== 'all') feed = feed.filter(item => item.type === tab);
+    // All / Activity read as a history: newest on top. Comments stay chat-style (newest at the bottom, by the composer).
+    const newestFirst = tab !== 'comment';
+    if (newestFirst) feed.reverse();
 
     if (!feed.length){
       const emptyLabel = tab === 'comment' ? 'Belum ada komentar.' : tab === 'activity' ? 'Belum ada aktivitas.' : 'Belum ada aktivitas atau pesan.';
@@ -534,7 +537,7 @@ const BugReportModule = {
         </div>
       `;
     }).join('');
-    list.scrollTop = list.scrollHeight;
+    list.scrollTop = newestFirst ? 0 : list.scrollHeight;
   },
 
   addComment(id){
@@ -686,14 +689,11 @@ const BugReportModule = {
       f.browser.value = bug.browser || ''; f.os.value = bug.os || ''; f.device.value = bug.device || '';
       f.buildVersion.value = bug.buildVersion || '';
       f.attachments.value = bug.attachments || ''; f.tester.value = bug.tester || '';
-      // Optional Environment section starts collapsed; open it when the bug already has data there.
-      document.getElementById('bugEnvSection').open = [bug.environment, bug.buildVersion, platform, bug.os, bug.browser, bug.device].some(Boolean);
       this.applyTestCase(bug.testCaseId || null, { restore: { useTcSteps: !!bug.useTcSteps, useTcExpected: !!bug.useTcExpected } });
     } else {
       f.severity.value = 'Medium';
       f.status.innerHTML = this.statusOptions(); // first status in master order
       f.tester.value = Auth.currentEmail() || '';
-      document.getElementById('bugEnvSection').open = false;
       this.applyTestCase(prefillTestCaseId || null);
     }
     // Already linked to a test case (editing a linked bug, or "Create Bug" from a
