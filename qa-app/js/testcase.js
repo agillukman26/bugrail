@@ -133,6 +133,11 @@ const TestCaseModule = {
   },
 
   uniqueValues(field){ return [...new Set(this.all().map(t => t[field]).filter(Boolean))].sort(); },
+  // Module filter: modules of the open file, in stored order = import sheet order (not A–Z).
+  fileModules(){
+    const { activeFileId } = this.ui;
+    return [...new Set(this.all().filter(t => !activeFileId || t.fileId === activeFileId).map(t => t.module).filter(Boolean))];
+  },
 
   /* ---- render ---- */
   render(){
@@ -281,8 +286,10 @@ const TestCaseModule = {
     const build = (id, field) => {
       const el = document.getElementById(id);
       const current = this.ui.filters[field];
+      const values = this.fileModules();
+      if (current && !values.includes(current)) values.push(current); // keep an active filter visible
       el.innerHTML = `<option value="">${el.dataset.label}</option>` +
-        this.uniqueValues(field).map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
+        values.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
     };
     build('tcFilterModule', 'module');
   },
@@ -528,6 +535,11 @@ const TestCaseModule = {
     }
     App.saveTestcases();
     this.closeForm();
+    // New row: open the table page it landed on (stored order puts it last).
+    if (!this.ui.editingId){
+      const idx = this.filtered().findIndex(t => t.id === App.state.testcases[App.state.testcases.length - 1].id);
+      if (idx >= 0) this.ui.page = Math.floor(idx / this.ui.pageSize) + 1;
+    }
     this.render();
   },
 
@@ -683,8 +695,6 @@ const TestCaseModule = {
       }
       const rows = sheets.flatMap(s => s.rows);
       const errors = sheets.flatMap(s => s.errors);
-      const unknown = [...new Set(sheets.flatMap(s => s.unknown))];
-      const ignored = unknown.length ? `Kolom diabaikan: ${unknown.join(', ')}` : '';
       if (errors.length){
         const list = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
         listDialog('Data import tidak sesuai', list, 'Perbaiki file lalu import ulang.');
@@ -707,7 +717,7 @@ const TestCaseModule = {
       App.saveTestcases();
       ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet`);
       this.render();
-      Toast.show(`${rows.length} test case dari ${sheetsUsed} sheet berhasil di-import.${ignored ? ' ' + ignored : ''}`, 'success');
+      Toast.show('Berhasil menambahkan file test case.', 'success');
     };
     reader.readAsArrayBuffer(file);
   },

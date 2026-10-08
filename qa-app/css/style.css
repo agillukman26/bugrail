@@ -504,6 +504,7 @@ input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:point
 .modal-footer{display:flex; justify-content:flex-end; gap:10px; margin-top:18px; padding-top:16px; border-top:1px solid var(--border);}
 .close-x{background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-faint); line-height:1;}
 
+.confirm-modal{z-index:2100;} /* above the workspace picker (2000) */
 .confirm-modal .modal{max-width:400px; text-align:center;}
 .confirm-list{margin:4px 0 12px; padding:10px 14px 10px 30px; max-height:50vh; overflow:auto; text-align:justify; font-size:13px; line-height:1.5; background:var(--status-failed-bg); border-radius:8px;}
 .confirm-list li{margin:2px 0;}

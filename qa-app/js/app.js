@@ -142,6 +142,22 @@ const App = {
     if (page === 'activitylog') ActivityLogModule.render();
 
     document.getElementById('sidebar').classList.remove('open');
+    if (!this._refreshing) this.refreshFromServer(page);
+  },
+
+  /* Menu change: pull other users' changes, then redraw the page.
+     ponytail: one GET /api/kv (all data) per 15s at most; per-key fetch if that grows heavy. */
+  async refreshFromServer(page){
+    if (Date.now() - (this._lastRefresh || 0) < 15000) return;
+    this._lastRefresh = Date.now();
+    if (!(await Storage.refresh())) return;
+    // Don't swap data under an open form, or if the user already moved on.
+    if (this.state.currentPage !== page || document.querySelector('.modal-overlay.active')) return;
+    this.loadAll();
+    this.renderSidebarCounts();
+    this._refreshing = true;
+    this.goTo(page, { fromHistory: true });
+    this._refreshing = false;
   },
 
   /* Hides sidebar entries the current role can't use. Role Permission stays

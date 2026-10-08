@@ -58,6 +58,12 @@ const Storage = {
     try{ localStorage.setItem(this.UNSYNCED_KEY, JSON.stringify([...keys])); }catch(e){}
   },
   hasUnsynced(){ return this.inflight > 0 || this.unsynced().length > 0; },
+  // Resolves once every PUT in flight has been answered (or after maxMs).
+  async settle(maxMs = 5000){
+    const end = Date.now() + maxMs;
+    while (this.inflight > 0 && Date.now() < end) await new Promise(r => setTimeout(r, 100));
+  },
+  leaving: false, // set by an intentional reload (logout) — skip the "unsaved changes" prompt
 
   async hydrate(){
     try{
@@ -90,6 +96,20 @@ const Storage = {
     });
     const sent = (await Promise.all(pending.map(key => this.push(key)))).filter(Boolean).length;
     if (sent) Toast.show(`${sent} perubahan yang belum tersimpan sudah dikirim ke server.`, 'success');
+  },
+
+  /* Re-read every key from the server (another user / tab may have changed it).
+     Skipped while a local change is still unsynced, so it can't be overwritten. */
+  async refresh(){
+    if (this.offlineBoot || this.hasUnsynced()) return false;
+    try{
+      const res = await fetch(`${API_BASE}/kv`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (this.hasUnsynced()) return false; // a save started while we were waiting
+      this.cache = data;
+      return true;
+    }catch(e){ return false; }
   },
 
   get(key, fallback){
@@ -143,7 +163,7 @@ const Storage = {
 
 // Leaving (Back / close tab) while a save hasn't reached the server: let the browser ask first.
 if (typeof window !== 'undefined') window.addEventListener('beforeunload', e => {
-  if (!Storage.hasUnsynced()) return;
+  if (Storage.leaving || !Storage.hasUnsynced()) return;
   e.preventDefault();
   e.returnValue = '';
 });
@@ -247,6 +267,11 @@ const TC_IMPORT = {
       else if (f !== '_skip' && !map[f]) map[f] = h;
     });
     if (!rawRows.length) return { rows, errors, unknown };
+    // Bug Report template (has "Bug Title *") shares Module / Scenario columns — refuse it outright.
+    if (headers.some(h => /^bugtitle$/.test(String(h).toLowerCase().replace(/[^a-z0-9]/g, '')))){
+      errors.push(`${sheetName}: ini template Bug Report, bukan Test Case`);
+      return { rows, errors, unknown };
+    }
     if (!map.scenario){
       errors.push(`${sheetName}: kolom Scenario tidak ada`);
       return { rows, errors, unknown };

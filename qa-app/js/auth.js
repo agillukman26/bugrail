@@ -3,7 +3,7 @@
    Client-side only: no real security, just an access gate to
    stop accidental destructive actions (e.g. delete file/folder).
    Accounts persist in localStorage (settings.users). Session
-   role/email live in sessionStorage — reset when the tab closes.
+   role/email live in localStorage — shared by every tab, kept until Logout.
    ========================================================== */
 
 const Auth = {
@@ -67,11 +67,11 @@ const Auth = {
 
   /* ---- Session ---- */
   role(){
-    const r = sessionStorage.getItem(this.ROLE_KEY);
+    const r = localStorage.getItem(this.ROLE_KEY);
     return r === 'user' ? 'user_umum' : r; // legacy role value from before the permission matrix
   },
   isAdmin(){ return this.role() === 'admin'; },
-  currentEmail(){ return sessionStorage.getItem(this.EMAIL_KEY); },
+  currentEmail(){ return localStorage.getItem(this.EMAIL_KEY); },
   // Active workspace id, or null for none / admin's "Semua workspace" (see workspace.js).
   currentWorkspaceId(){
     const v = sessionStorage.getItem(this.WORKSPACE_KEY);
@@ -252,18 +252,23 @@ const Auth = {
       return;
     }
     errEl.textContent = '';
-    sessionStorage.setItem(this.ROLE_KEY, user.role);
-    sessionStorage.setItem(this.EMAIL_KEY, this.normalizeEmail(email));
+    localStorage.setItem(this.ROLE_KEY, user.role);
+    localStorage.setItem(this.EMAIL_KEY, this.normalizeEmail(email));
     sessionStorage.removeItem(this.WORKSPACE_KEY);
     this._freshLogin = true;
     if (WorkspacePicker.resolveOnStart()) this.startApp();
   },
 
-  logout(){
+  async logout(){
+    if (!(await confirmDialog('Keluar dari BugRail?', 'Apakah anda yakin ingin logout?', 'Logout'))) return;
     ActivityLog.record('logout', `${this.currentEmail()} logout`);
-    sessionStorage.removeItem(this.ROLE_KEY);
-    sessionStorage.removeItem(this.EMAIL_KEY);
+    // Let the log (and any other save) reach the server first. Anything still
+    // unsynced stays in localStorage and is re-sent on next boot, so no prompt.
+    await Storage.settle();
+    localStorage.removeItem(this.ROLE_KEY);
+    localStorage.removeItem(this.EMAIL_KEY);
     sessionStorage.removeItem(this.WORKSPACE_KEY);
+    Storage.leaving = true;
     location.reload();
   },
 
@@ -327,6 +332,13 @@ const Auth = {
     return pass === total;
   }
 };
+
+// Logged out (or in as someone else) in another tab: this tab follows.
+if (typeof window !== 'undefined') window.addEventListener('storage', e => {
+  if (e.key !== Auth.EMAIL_KEY) return;
+  Storage.leaving = true;
+  location.reload();
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
   await Storage.hydrate();

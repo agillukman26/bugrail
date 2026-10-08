@@ -46,4 +46,7 @@ assert.match(T.parseSheet('Sheet1', [row({ Scenario: 'A' }, 1)], '', TYPES).erro
 // No scenario-like column: one sheet-level error instead of per-row noise.
 assert.match(T.parseSheet('Data', [row({ Nama: 'A' }, 1)], 'Data', TYPES).errors[0], /^Data: kolom Scenario tidak ada$/);
 
+// Bug Report template is refused, not half-imported as test cases.
+assert.deepStrictEqual([...T.parseSheet('Template', [row({ 'Module *': 'Login', 'Scenario': 'A', 'Bug Title *': 'x' }, 1)], '', TYPES).errors], ['Template: ini template Bug Report, bukan Test Case']);
+
 console.log('tcimport.check OK');

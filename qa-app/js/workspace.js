@@ -121,6 +121,9 @@ const WorkspacePicker = {
     const ids = this.myWorkspaceIds();
     const current = this.activeRaw();
     if (current && ids.includes(current)) return true;     // reload inside an open session
+    // New tab of a logged-in session (not a fresh login): reopen the last workspace.
+    const last = this.pref().last;
+    if (!current && !Auth._freshLogin && ids.includes(last)){ this.setActive(last); return true; }
     // Opened from a shared bug link: enter the bug's workspace, skip the picker.
     const linkId = App.deepLinkBugId();
     if (linkId){
