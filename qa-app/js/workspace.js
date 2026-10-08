@@ -228,12 +228,14 @@ const WorkspacePicker = {
     const dot = w => `<span class="ws-dot sm" style="--ws-bg:${color(w.id)[0]}; --ws-fg:${color(w.id)[1]};">${w.id === ALL ? 'ALL' : escapeHtml(WorkspaceCalc.initials(w.name))}</span>`;
     const fileCount = (App.state.files || []).filter(f => active.id === ALL || f.workspaceId === active.id).length;
     const mine = this.myWorkspaceIds().map(toWs).filter(Boolean);
+    // Only one workspace and nothing else in the menu (admin's "+ Workspace baru"): plain label, no dropdown.
+    const locked = !this.canSwitch() && !Auth.isAdmin();
     el.innerHTML = `
       <div class="ws-switcher-label">Workspace</div>
-      <button class="ws-switcher-btn" type="button" id="wsSwitcherBtn" title="${escapeHtml(active.name)}" aria-haspopup="true">
+      <button class="ws-switcher-btn${locked ? ' locked' : ''}" type="button" id="wsSwitcherBtn" title="${escapeHtml(active.name)}" ${locked ? 'disabled' : 'aria-haspopup="true"'}>
         ${dot(active)}
         <span class="ws-switcher-text"><b>${escapeHtml(active.name)}</b><span>${fileCount} file</span></span>
-        <svg class="ws-switcher-caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"/></svg>
+        ${locked ? '' : `<svg class="ws-switcher-caret" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"/></svg>`}
       </button>
       <div class="ws-menu" id="wsMenu">
         ${mine.map(w => `<button class="ws-menu-item" type="button" data-ws="${escapeHtml(w.id)}">${dot(w)}<span>${escapeHtml(w.name)}</span>${w.id === active.id ? '<span class="ws-check">✓</span>' : ''}</button>`).join('')}

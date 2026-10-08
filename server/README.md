@@ -69,6 +69,10 @@ MongoDB in the background. If the API is unreachable, the app falls back to
   ```
   Uses `apiKey` from the body if given, else `GEMINI_API_KEY`. Max 5 images.
   Rate-limited to 10 requests per 5 minutes per IP (in-memory).
+- `POST /api/bug/analyze` — draft a bug from a failed test case with Gemini.
+  Body: `{ "testcase": { "actualResult": "...", "expectedResult": "...", ... }, "apiKey": "optional" }`.
+  Returns `{ title, severity, priority, analysis }`. Same key lookup and rate limit
+  as TestForge; not affected by `TESTFORGE_ENABLED`.
 
 Keys: `qa_testcases`, `qa_bugs`, `qa_files`, `qa_settings`, `qa_counters`, `qa_activity_log`.
 
