@@ -27,7 +27,7 @@ const TestCaseModule = {
   ui: {
     search: '',
     filters: { module:'', typeTest:'', status:'' },
-    sortKey: 'id', sortDir: 'asc',
+    sortKey: '', sortDir: 'asc', // '' = stored order (creation / import sheet order) until a header is clicked
     page: 1, pageSize: 10,
     selected: new Set(),
     editingId: null,
@@ -128,7 +128,7 @@ const TestCaseModule = {
       if (filters.status && tc.status !== filters.status) return false;
       return true;
     });
-    rows.sort((a, b) => compareRows(a, b, sortKey, sortDir, tcCode));
+    if (sortKey) rows.sort((a, b) => compareRows(a, b, sortKey, sortDir, tcCode));
     return rows;
   },
 
@@ -599,6 +599,9 @@ const TestCaseModule = {
     this.closeExecute();
     this.render();
     Toast.show(`Hasil eksekusi ${this.ui.executingId} disimpan.`, 'success');
+    // Newly failed: open a bug draft (AI-analysed) straight away.
+    // Paused for now — uncomment to turn back on. "🐞 Create Bug" still opens the AI draft.
+    // if (from !== 'Failed' && f.status.value === 'Failed' && Auth.can('bugreport_create')) this.createBugFromTestCase(this.ui.executingId);
   },
 
   duplicate(id){
@@ -663,48 +666,48 @@ const TestCaseModule = {
   importFile(file){
     if (!Auth.can('testcase_create')) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
+      let sheets;
       try{
         const wb = XLSX.read(e.target.result, { type: 'array' });
         // Read every sheet — Export Excel writes one sheet per module. A row with an
         // empty Module takes the sheet's name (unless it's a generic "Sheet1"/"Template").
-        let count = 0, sheetsUsed = 0;
-        wb.SheetNames.forEach(sheetName => {
-          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
-          const sheetModule = /^(sheet\s*\d*|template)$/i.test(sheetName.trim()) ? '' : sheetName.trim();
-          const before = count;
-          rows.forEach(raw => {
-            const r = {};
-            Object.keys(raw).forEach(k => { r[k.replace(/\s*\*\s*$/, '').trim()] = raw[k]; }); // "Module *" -> "Module"
-            const module = String(r.Module || r.module || sheetModule).trim();
-            const scenario = r.Scenario || r.scenario;
-            if (!module || !scenario) return;
-            // Always number imported rows fresh, in file order, per workspace — a
-            // "Test Case ID" in the file (often from another workspace/export) is ignored.
-            const code = this.nextCode(module, this.ui.activeFileId);
-            App.state.testcases.push({
-              id: IdGen.uid('TC'), code, module, roleUser: r['Role User'] || r.roleUser || '',
-              scenario, testCase: r['Test Case'] || r.testCase || '',
-              preconditions: r['Pre Kondisi'] || r.Preconditions || r.preconditions || '',
-              steps: textToStepsHtml(r['Test Step'] || r.Steps || r.steps || ''), testData: r['Test Data'] || r.testData || '',
-              expectedResult: r['Expected Result'] || r.expectedResult || '',
-              actualResult: '', evidence: r['Evidence'] || r.evidence || '', status: 'Open',
-              typeTest: r['Type Test'] || r.typeTest || 'Positive',
-              executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
-            });
-            count++;
-          });
-          if (count > before) sheetsUsed++;
+        sheets = wb.SheetNames.map(name => {
+          const sheetModule = /^(sheet\s*\d*|template)$/i.test(name.trim()) ? '' : name.trim();
+          return TC_IMPORT.parseSheet(name, XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' }), sheetModule, this.TYPE_TEST);
         });
-        App.ensureDefaultFile();
-        App.saveTestcases();
-        ActivityLog.record('testcase_create', `${count} test case di-import dari ${sheetsUsed} sheet`);
-        this.render();
-        Toast.show(`${count} test case dari ${sheetsUsed} sheet berhasil di-import.`, count ? 'success' : 'info');
       }catch(err){
         console.error(err);
-        Toast.show('Gagal membaca file. Pastikan format sesuai template.', 'error');
+        Toast.show('Gagal membaca file. Pastikan file Excel/CSV yang valid.', 'error');
+        return;
       }
+      const rows = sheets.flatMap(s => s.rows);
+      const errors = sheets.flatMap(s => s.errors);
+      const unknown = [...new Set(sheets.flatMap(s => s.unknown))];
+      const ignored = unknown.length ? `Kolom diabaikan: ${unknown.join(', ')}` : '';
+      if (errors.length){
+        const list = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
+        listDialog('Data import tidak sesuai', list, 'Perbaiki file lalu import ulang.');
+        return; // nothing imported until the file is fixed
+      }
+      if (!rows.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
+      rows.forEach(r => {
+        // Always number imported rows fresh, in file order, per workspace — a
+        // "Test Case ID" in the file (often from another workspace/export) is ignored.
+        App.state.testcases.push({
+          id: IdGen.uid('TC'), code: this.nextCode(r.module, this.ui.activeFileId), module: r.module, roleUser: r.roleUser || '',
+          scenario: r.scenario, testCase: r.testCase || '', preconditions: r.preconditions || '',
+          steps: textToStepsHtml(r.steps || ''), testData: r.testData || '', expectedResult: r.expectedResult || '',
+          actualResult: '', evidence: r.evidence || '', status: 'Open', typeTest: r.typeTest || 'Positive',
+          executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
+        });
+      });
+      const sheetsUsed = sheets.filter(s => s.rows.length).length;
+      App.ensureDefaultFile();
+      App.saveTestcases();
+      ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet`);
+      this.render();
+      Toast.show(`${rows.length} test case dari ${sheetsUsed} sheet berhasil di-import.${ignored ? ' ' + ignored : ''}`, 'success');
     };
     reader.readAsArrayBuffer(file);
   },

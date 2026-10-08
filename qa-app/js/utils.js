@@ -215,6 +215,66 @@ const BUG_FORM = {
   }
 };
 // Legacy priority values (form used "Critical", dashboard "Highest") read as the current top level.
+/* Test case import. Headers are compared lowercase, letters/digits only, so
+   "Pre-Kondisi", "pre kondisi *" and "PreKondisi" all match an alias. */
+const TC_IMPORT = {
+  ALIASES: {
+    module: ['module', 'modul', 'fitur', 'feature', 'menu'],
+    roleUser: ['roleuser', 'role', 'userrole', 'aktor', 'actor'],
+    scenario: ['scenario', 'skenario', 'testscenario', 'scenarioname', 'judul', 'title'],
+    testCase: ['testcase', 'testcasename', 'testcasedescription', 'deskripsi', 'description', 'kasusuji'],
+    preconditions: ['prekondisi', 'precondition', 'preconditions', 'prasyarat', 'kondisiawal'],
+    steps: ['teststep', 'teststeps', 'step', 'steps', 'langkah', 'langkahlangkah', 'langkahpengujian'],
+    testData: ['testdata', 'data', 'datauji'],
+    expectedResult: ['expectedresult', 'expectedresults', 'expected', 'hasilyangdiharapkan', 'hasildiharapkan', 'ekspektasi'],
+    typeTest: ['typetest', 'testtype', 'type', 'tipe', 'tipetest', 'jenistest'],
+    evidence: ['evidence', 'bukti'],
+    // Export-only columns: known, so not reported as unknown, but never imported.
+    _skip: ['testcaseid', 'id', 'no', 'actualresult', 'status', 'executiondate']
+  },
+  field(header){
+    const n = String(header).toLowerCase().replace(/[^a-z0-9]/g, '');
+    return Object.keys(this.ALIASES).find(k => this.ALIASES[k].includes(n)) || null;
+  },
+  /* rawRows: XLSX sheet_to_json(..., { defval: '' }) output. Returns
+     { rows: [test case fields], errors: ['Sheet "x" baris n: ...'], unknown: [header] }. */
+  parseSheet(sheetName, rawRows, sheetModule, typeTests){
+    const headers = rawRows.length ? Object.keys(rawRows[0]) : [];
+    const map = {}, unknown = [], errors = [], rows = [];
+    headers.forEach(h => {
+      const f = this.field(h);
+      if (!f){ if (!/^__EMPTY/.test(h)) unknown.push(h); }
+      else if (f !== '_skip' && !map[f]) map[f] = h;
+    });
+    if (!rawRows.length) return { rows, errors, unknown };
+    if (!map.scenario){
+      errors.push(`${sheetName}: kolom Scenario tidak ada`);
+      return { rows, errors, unknown };
+    }
+    const byProblem = {}; // problem -> sheet rows, so one line per problem
+    rawRows.forEach((raw, i) => {
+      if (!Object.values(raw).some(v => String(v).trim())) return; // blank row
+      const tc = {};
+      Object.keys(map).forEach(k => { tc[k] = String(raw[map[k]] ?? '').trim(); });
+      tc.module = tc.module || sheetModule;
+      const problems = [];
+      if (!tc.module) problems.push('Module kosong');
+      if (!tc.scenario) problems.push('Scenario kosong');
+      if (tc.typeTest){
+        const t = typeTests.find(x => x.toLowerCase() === tc.typeTest.toLowerCase());
+        if (t) tc.typeTest = t; else problems.push(`Type Test harus ${typeTests.join('/')}`);
+      }
+      // __rowNum__ is SheetJS's 0-based sheet row (survives skipped blank rows).
+      problems.forEach(p => (byProblem[p] = byProblem[p] || []).push((raw.__rowNum__ ?? i + 1) + 1));
+      if (!problems.length) rows.push(tc);
+    });
+    Object.entries(byProblem).forEach(([p, nums]) => {
+      errors.push(`${sheetName} baris ${nums.slice(0, 5).join(', ')}${nums.length > 5 ? ` (+${nums.length - 5})` : ''}: ${p}`);
+    });
+    return { rows, errors, unknown };
+  }
+};
+
 function normPriority(p){ return p === 'Highest' || p === 'Critical' ? 'Urgent' : p; }
 
 /* Bug status rules, by status code (Master Status). Dev flow Open / In Progress /
@@ -337,6 +397,23 @@ function bindBackdropClose(overlay, onClose){
   let downOnBackdrop = false;
   overlay.addEventListener('mousedown', e => { downOnBackdrop = e.target === overlay; });
   overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) onClose(); });
+}
+
+// Read-only notice with a bullet list (e.g. import errors). Closes via ✕ or backdrop.
+function listDialog(title, items, message = ''){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay confirm-modal active';
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" style="float:right;">✕</button>
+      <div class="icon-warn">!</div>
+      <h2 style="margin:0 0 6px;">${escapeHtml(title)}</h2>
+      <ul class="confirm-list">${items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      ${message ? `<p class="text-dim" style="font-size:13px;">${escapeHtml(message)}</p>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.close-x').onclick = () => overlay.remove();
+  bindBackdropClose(overlay, () => overlay.remove());
 }
 
 /* ---------- Confirm dialog (returns a Promise<boolean>) ---------- */

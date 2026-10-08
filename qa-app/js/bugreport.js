@@ -695,7 +695,11 @@ const BugReportModule = {
       f.status.innerHTML = this.statusOptions(); // first status in master order
       f.tester.value = Auth.currentEmail() || '';
       this.applyTestCase(prefillTestCaseId || null);
+      // Actual result the tester wrote when running the test case — still editable.
+      const tc = App.state.testcases.find(t => t.id === prefillTestCaseId);
+      if (tc) f.actualResult.value = tc.actualResult || '';
     }
+    f.description.closest('.field').hidden = !f.description.value; // shown once it has text (AI analysis / old bugs)
     // Already linked to a test case (editing a linked bug, or "Create Bug" from a
     // test case): lock the picker so the link — and the fields it filled — can't change.
     const trigger = document.getElementById('bugTestCaseTrigger');
@@ -709,6 +713,43 @@ const BugReportModule = {
     this.render();
     this.ui.formSnapshot = this.formSnapshot();
     document.getElementById('bugModalOverlay').classList.add('active');
+    if (!bug && prefillTestCaseId) this.aiAnalyze(prefillTestCaseId);
+  },
+  // Failed test case -> AI drafts title / severity / priority / analysis from its actual
+  // result. Only fills what the tester hasn't typed; they review it before saving.
+  async aiAnalyze(tcId){
+    const tc = App.state.testcases.find(t => t.id === tcId);
+    if (!tc || !String(tc.actualResult || '').trim()) return;
+    const f = document.getElementById('bugForm');
+    const titleHint = f.title.placeholder;
+    f.title.placeholder = '✨ AI sedang menganalisa...';
+    try{
+      const res = await fetch(`${API_BASE}/bug/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: App.state.settings.geminiApiKey || undefined,
+          testcase: { module: tc.module, scenario: tc.scenario, testCase: tc.testCase, preconditions: tc.preconditions,
+            steps: stepsHtmlToText(tc.steps || ''), testData: tc.testData, expectedResult: tc.expectedResult, actualResult: tc.actualResult }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Analisa gagal');
+      // The tester may have closed the form or opened another one while waiting.
+      if (this.ui.editingId || this.ui.formTcId !== tcId || !document.getElementById('bugModalOverlay').classList.contains('active')) return;
+      if (data.title && !f.title.value.trim()) f.title.value = data.title;
+      if (data.severity) f.severity.value = data.severity;
+      if (data.priority) f.priority.value = data.priority;
+      if (data.analysis && !f.description.value.trim()){
+        f.description.value = data.analysis;
+        f.description.closest('.field').hidden = false;
+      }
+      Toast.show('Draft bug dari AI terisi — cek lalu simpan.', 'success');
+    }catch(e){
+      Toast.show(`Analisa AI gagal (${e.message}). Isi manual.`, 'error');
+    }finally{
+      f.title.placeholder = titleHint;
+    }
   },
   closeForm(){ document.getElementById('bugModalOverlay').classList.remove('active'); },
   formSnapshot(){

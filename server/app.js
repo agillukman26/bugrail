@@ -202,6 +202,24 @@ function isTestForgeRateLimited(ip){
   return hits.length > TESTFORGE_RATE_LIMIT;
 }
 
+// Returns the model's text, or null when the provider call fails (logged).
+async function askGemini(apiKey, parts){
+  const geminiRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ contents: [{ parts }] })
+    }
+  );
+  if (!geminiRes.ok) {
+    console.error('Gemini API error', geminiRes.status, await geminiRes.text());
+    return null;
+  }
+  const geminiJson = await geminiRes.json();
+  return geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
 function buildTestForgePrompt(mode, content, fields, module){
   const fieldList = fields.join(', ');
   const moduleHint = module ? `The module/feature under test is "${module}".` : '';
@@ -255,21 +273,8 @@ app.post('/api/testforge/generate', async (req, res) => {
       });
     }
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({ contents: [{ parts }] })
-      }
-    );
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error('Gemini API error', geminiRes.status, errText);
-      return res.status(502).json({ error: 'AI provider error' });
-    }
-    const geminiJson = await geminiRes.json();
-    const rawText = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const rawText = await askGemini(apiKey, parts);
+    if (rawText === null) return res.status(502).json({ error: 'AI provider error' });
     const jsonMatch = rawText.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       return res.status(502).json({ error: 'AI response had no JSON array', raw: rawText });
@@ -295,9 +300,57 @@ app.post('/api/testforge/generate', async (req, res) => {
   }
 });
 
+// Failed test case -> draft bug (title, severity, priority, analysis). The tester
+// reviews it in the bug form before saving; nothing is stored here.
+const BUG_SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
+const BUG_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
+const BUG_TC_FIELDS = ['module', 'scenario', 'testCase', 'preconditions', 'steps', 'testData', 'expectedResult', 'actualResult'];
+
+function buildBugAnalyzePrompt(tc){
+  const lines = BUG_TC_FIELDS.map(f => `${f}: ${String(tc[f] || '').slice(0, 3000)}`).join('\n');
+  return `You are a QA engineer. This test case FAILED. Write a bug report draft from it, based mainly on the actualResult vs expectedResult.
+Respond with ONLY a JSON object, no markdown fences, with these keys:
+title = short bug title (max 120 chars, Bahasa Indonesia), describing what is wrong;
+severity = one of ${BUG_SEVERITIES.join(', ')};
+priority = one of ${BUG_PRIORITIES.join(', ')};
+analysis = short analysis in Bahasa Indonesia (max 600 chars): impact to the user and possible cause.
+Test case:
+${lines}`;
+}
+
+app.post('/api/bug/analyze', async (req, res) => {
+  try {
+    if (isTestForgeRateLimited(req.ip)) {
+      return res.status(429).json({ error: 'Too many requests, coba lagi nanti.' });
+    }
+    const { testcase, apiKey: bodyApiKey } = req.body || {};
+    if (!testcase || typeof testcase !== 'object' || !String(testcase.actualResult || '').trim()) {
+      return res.status(400).json({ error: 'Actual Result test case wajib diisi' });
+    }
+    const apiKey = (typeof bodyApiKey === 'string' && bodyApiKey.trim()) || process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY belum diisi. Isi di halaman Settings atau .env server.' });
+
+    const rawText = await askGemini(apiKey, [{ text: buildBugAnalyzePrompt(testcase) }]);
+    if (rawText === null) return res.status(502).json({ error: 'AI provider error' });
+    let parsed;
+    try { parsed = JSON.parse((rawText.match(/\{[\s\S]*\}/) || [])[0]); } catch (e) { parsed = null; }
+    if (!parsed || typeof parsed !== 'object') return res.status(502).json({ error: 'AI response JSON parse failed' });
+    const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    res.json({
+      title: str(parsed.title, 150),
+      severity: BUG_SEVERITIES.includes(parsed.severity) ? parsed.severity : '',
+      priority: BUG_PRIORITIES.includes(parsed.priority) ? parsed.priority : '',
+      analysis: str(parsed.analysis, 2000)
+    });
+  } catch (err) {
+    console.error('POST /api/bug/analyze failed', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-module.exports = { app, sameSharedWith, isTestForgeRateLimited, buildTestForgePrompt, testForgeHits };
+module.exports = { app, sameSharedWith, isTestForgeRateLimited, buildTestForgePrompt, buildBugAnalyzePrompt, testForgeHits };

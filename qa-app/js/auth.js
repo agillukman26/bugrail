@@ -271,8 +271,10 @@ const Auth = {
     const el = document.getElementById('authBadge');
     if (!el) return;
     const role = this.role();
+    const email = this.currentEmail() || '';
+    const name = email.split('@')[0] || (role === 'admin' ? 'Admin' : 'User');
     el.innerHTML = `
-      <span class="auth-role">${role === 'admin' ? '🔑 Admin' : '👤 User'}</span>
+      <span class="auth-role" title="${escapeHtml(email)}">${role === 'admin' ? '🔑' : '👤'} ${escapeHtml(name)}</span>
       <button class="btn sm ghost" id="authLogoutBtn">Logout</button>
     `;
     document.getElementById('authLogoutBtn').addEventListener('click', () => this.logout());
