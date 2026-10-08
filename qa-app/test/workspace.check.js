@@ -18,9 +18,10 @@ assert.strictEqual(json(W.userWorkspaceIds({})), '[]');
 // Auto-enter: none -> '' (shared only), one -> it, many -> picker unless "remember"
 assert.strictEqual(W.autoEnter([], {}), '');
 assert.strictEqual(W.autoEnter(['A'], {}), 'A');
-assert.strictEqual(W.autoEnter(['A', 'B'], { remember: false, last: 'B' }), null);
-assert.strictEqual(W.autoEnter(['A', 'B'], { remember: true, last: 'B' }), 'B');
-assert.strictEqual(W.autoEnter(['A', 'B'], { remember: true, last: 'GONE' }), null, 'removed workspace -> picker');
+assert.strictEqual(W.autoEnter(['A', 'B'], { autoOpen: false, last: 'B' }), null);
+assert.strictEqual(W.autoEnter(['A', 'B'], { autoOpen: true, last: 'B' }), 'B');
+assert.strictEqual(W.autoEnter(['A', 'B'], { remember: true, last: 'B' }), null, 'old default-on remember no longer skips the picker');
+assert.strictEqual(W.autoEnter(['A', 'B'], { autoOpen: true, last: 'GONE' }), null, 'removed workspace -> picker');
 
 assert.strictEqual(W.initials('New ERP'), 'NE');
 assert.strictEqual(W.initials('Saffmedic'), 'SA');

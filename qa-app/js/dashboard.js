@@ -157,7 +157,7 @@ const Dashboard = {
         datasets: [
           { label: 'Passed', data: modules.length ? passedData : [0], backgroundColor: '#1E9E6B', borderRadius: 4 },
           { label: 'Failed', data: modules.length ? failedData : [0], backgroundColor: '#D64550', borderRadius: 4 },
-          { label: 'Other', data: modules.length ? otherData : [0], backgroundColor: '#8A93A6', borderRadius: 4 }
+          { label: 'Open', data: modules.length ? otherData : [0], backgroundColor: '#8A93A6', borderRadius: 4 }
         ]
       },
       options: {
