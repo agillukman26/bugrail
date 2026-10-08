@@ -41,7 +41,7 @@ const WorkspaceCalc = {
   autoEnter(ids, pref = {}){
     if (!ids.length) return '';
     if (ids.length === 1) return ids[0];
-    if (pref.remember && ids.includes(pref.last)) return pref.last;
+    if (pref.autoOpen && ids.includes(pref.last)) return pref.last;
     return null;
   },
 
@@ -90,10 +90,11 @@ const WorkspaceCalc = {
 };
 
 const WorkspacePicker = {
-  // Per browser + per account: last opened workspace, visit times, "remember" tick.
+  // Per browser + per account: last opened workspace, visit times, "autoOpen" tick (off by default;
+  // renamed from the old default-on "remember" so every account sees the picker again).
   prefKey(){ return `qa_ws_pref_${(Auth.currentEmail() || '').toLowerCase()}`; },
   pref(){
-    try{ return JSON.parse(localStorage.getItem(this.prefKey())) || { remember: true, visits: {} }; }catch(e){ return { remember: true, visits: {} }; }
+    try{ return JSON.parse(localStorage.getItem(this.prefKey())) || { visits: {} }; }catch(e){ return { visits: {} }; }
   },
   savePref(p){ try{ localStorage.setItem(this.prefKey(), JSON.stringify(p)); }catch(e){} },
 
@@ -189,7 +190,7 @@ const WorkspacePicker = {
               <div class="ws-open">Buka workspace →</div>
             </button>`).join('')}
         </div>
-        <label class="ws-remember"><input type="checkbox" id="wsRemember" ${pref.remember !== false ? 'checked' : ''}> Langsung buka workspace terakhir saat login berikutnya</label>
+        <label class="ws-remember"><input type="checkbox" id="wsRemember" ${pref.autoOpen ? 'checked' : ''}> Langsung buka workspace terakhir saat login berikutnya</label>
       </div>`;
     el.classList.add('open');
     el.querySelectorAll('.ws-card').forEach(card => card.onclick = () => this.choose(card.dataset.ws));
@@ -201,7 +202,8 @@ const WorkspacePicker = {
 
   choose(wsId){
     const p = this.pref();
-    p.remember = document.getElementById('wsRemember').checked;
+    p.autoOpen = document.getElementById('wsRemember').checked;
+    delete p.remember;
     this.savePref(p);
     const switching = !document.body.classList.contains('pre-auth') && this.activeRaw() !== wsId;
     this.setActive(wsId);
