@@ -15,6 +15,28 @@ const tcs = (passed, other = {}) => [
 ];
 const bug = (severity, status, extra = {}) => ({ id: 'B', title: 't', severity, status, ...extra });
 
+// QA view
+{
+  const now = new Date('2026-10-15T10:00:00').getTime();
+  const q = R.qaStats([
+    { status: 'Passed', executionDate: '2026-10-15', module: 'A' },
+    { status: 'Failed', executionDate: '2026-10-14', module: 'A' },
+    { status: 'Passed', executionDate: '2026-09-01', module: 'B' },
+    { status: 'Open', module: 'B' }
+  ], [
+    bug('High', 'Retest', { reportDate: '2026-10-01T00:00:00', activity: [{ to: 'Retest', at: '2026-10-10T10:00:00' }] }),
+    bug('Low', 'Retest', { reportDate: '2026-10-15T08:00:00' }),
+    bug('Low', 'Open', { reportDate: '2026-10-15T09:00:00' })
+  ], now);
+  assert.strictEqual(q.retest.length, 2, 'only Retest bugs wait for QA');
+  assert.strictEqual(Math.round(q.retest[0].ageDays), 5, 'age counts from entering Retest, oldest first');
+  assert.strictEqual(q.retestLate, 1);
+  assert.strictEqual(q.trend.length, R.TREND_DAYS);
+  assert.deepStrictEqual([q.trend[13].passed, q.trend[12].failed, q.trend[13].newBugs], [1, 1, 2]);
+  assert.strictEqual(q.runWeek, 2, 'run older than 7 days not in this week');
+  assert.strictEqual(JSON.stringify(q.stale.map(m => [m.module, m.notRun, m.stale])), '[["B",1,1]]');
+}
+
 // Go-live verdicts
 assert.strictEqual(R.goLive([], []).verdict, 'EMPTY', 'no test cases = waiting for data, never NO GO');
 assert.strictEqual(R.goLive([], [bug('Critical', 'Open')]).verdict, 'EMPTY', 'bugs alone still = waiting for data');

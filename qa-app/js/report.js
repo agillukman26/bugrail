@@ -174,6 +174,58 @@ const ReportCalc = {
     return { measured, onTime, unmeasured, onTimePct, bySeverity, overdueOpen, verdict };
   },
 
+  /* ---- QA view (internal): where testing is stuck ---- */
+  WAITING_QA: ['Retest'],   // dev says fixed, QA's turn to verify
+  RETEST_LATE_DAYS: 2,
+  STALE_DAYS: 14,
+  TREND_DAYS: 14,
+  dayKey(d){ const x = new Date(d); return isNaN(x) ? '' : `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; },
+
+  /* Trend uses each test case's LAST executionDate (no run history is stored),
+     so a re-run moves the test to the newer day. */
+  qaStats(tcs, bugs, now = Date.now()){
+    const days = n => (now - new Date(n)) / 864e5;
+    const retest = bugs.filter(b => this.WAITING_QA.includes(b.status)).map(b => {
+      const entered = (b.activity || []).filter(a => a.to === b.status).pop();
+      const since = (entered && entered.at) || b.reportDate;
+      return { bug: b, since, ageDays: since ? days(since) : 0 };
+    }).sort((a, b) => b.ageDays - a.ageDays);
+
+    const trend = [];
+    for (let i = this.TREND_DAYS - 1; i >= 0; i--){
+      const key = this.dayKey(now - i * 864e5);
+      const run = tcs.filter(t => t.status !== 'Open' && t.executionDate && this.dayKey(t.executionDate) === key);
+      trend.push({
+        key,
+        passed: run.filter(t => t.status === 'Passed').length,
+        failed: run.filter(t => t.status === 'Failed').length,
+        other: run.filter(t => t.status !== 'Passed' && t.status !== 'Failed').length,
+        newBugs: bugs.filter(b => b.reportDate && this.dayKey(b.reportDate) === key).length
+      });
+    }
+    const week = trend.slice(-7);
+    const sum = (list, k) => list.reduce((s, d) => s + d[k], 0);
+
+    const modMap = {};
+    tcs.forEach(t => {
+      const m = modMap[this.moduleOf(t)] = modMap[this.moduleOf(t)] || { module: this.moduleOf(t), total: 0, notRun: 0, stale: 0, lastRun: '' };
+      m.total++;
+      if (t.status === 'Open') m.notRun++;
+      else if (t.executionDate && days(t.executionDate) > this.STALE_DAYS) m.stale++;
+      if (t.executionDate && t.executionDate > m.lastRun) m.lastRun = t.executionDate;
+    });
+    const stale = Object.values(modMap).filter(m => m.notRun || m.stale)
+      .sort((a, b) => (b.notRun + b.stale) - (a.notRun + a.stale) || a.module.localeCompare(b.module));
+
+    return {
+      retest, retestLate: retest.filter(x => x.ageDays > this.RETEST_LATE_DAYS).length,
+      trend, runWeek: sum(week, 'passed') + sum(week, 'failed') + sum(week, 'other'),
+      runPrevWeek: sum(trend.slice(0, 7), 'passed') + sum(trend.slice(0, 7), 'failed') + sum(trend.slice(0, 7), 'other'),
+      bugsWeek: sum(week, 'newBugs'),
+      stale, notRun: sum(stale, 'notRun'), staleRun: sum(stale, 'stale')
+    };
+  },
+
   /* Plain-language lines for PM/BA — no QA jargon ("pass rate", "severity"). */
   businessSummary(g, r, s){
     const verdictText = {
@@ -268,6 +320,7 @@ const ReportModule = {
   filters: { fileId: '', module: '' },
   ALL_FILES: 'all',
   open: null,  // filter dropdown currently open: 'module' | 'round' | null
+  tab: 'golive', // 'golive' (PM/BA) | 'qa' (internal QA view)
   URL_KEYS: { module: 'rptModule', fileId: 'rptRound' },
   VERDICT: {
     GO: ['go', 'GO', 'GO', 'go'],
@@ -316,7 +369,7 @@ const ReportModule = {
     const [cls, label, short, icon] = this.VERDICT[verdict];
     return `<span class="rpt-chip rpt-${cls}${size ? ` rpt-chip-${size}` : ''}">${size === 'big' ? RPT_ICON[icon] : ''}${size === 'sm' ? short : label}</span>`;
   },
-  pct(v){ return v === null || v === undefined ? '—' : `${v}%`; },
+  pct(v){ return `${v ?? 0}%`; },
 
   /* Big data: show the logo spinner first, build the report a frame later so the
      browser can paint it. Only when the report is regenerated (filters changed) —
@@ -356,7 +409,7 @@ const ReportModule = {
 
     const body = state === 'pick' || state === 'empty' ? this.pickView(opts, files, state)
       : state === 'filtered' ? this.filteredView(opts, allBugs, files)
-      : this.dataView(g, r, bugs, files);
+      : this.tab === 'qa' ? this.qaView(tcs, bugs) : this.dataView(g, r, bugs, files);
     // Pick / empty: no toolbar — the file picker sits inside the card instead.
     document.getElementById('rptBody').innerHTML = `<div class="rpt">${state === 'pick' || state === 'empty' ? '' : this.filterBar(opts, files, state)}${body}</div>`;
   },
@@ -368,12 +421,16 @@ const ReportModule = {
     const active = !!(this.filters.module || this.fileFilter());
     return `
       <div class="toolbar rpt-toolbar" title="Ringkasan dan PDF otomatis mencantumkan konteks filter ini.">
+        <div class="rpt-tabs" role="tablist" aria-label="Jenis report">
+          ${[['golive', 'Go-Live (PM/BA)'], ['qa', 'QA']].map(([k, label]) =>
+            `<button type="button" role="tab" class="rpt-tab${this.tab === k ? ' on' : ''}" aria-selected="${this.tab === k}" data-act="tab" data-value="${k}">${label}</button>`).join('')}
+        </div>
         ${this.dropdown('module', 'Module', this.filters.module || 'Semua module', off, () => this.moduleMenu(opts, fileName))}
         ${this.dropdown('round', 'Putaran', fileName || 'Semua putaran testing', off, () => this.roundMenu(opts))}
         ${active ? '<button type="button" class="btn sm ghost" data-act="reset">Reset</button>' : ''}
         <div class="spacer"></div>
-        ${state === 'data' ? '<button type="button" class="btn sm" data-act="copy">Salin Ringkasan</button>' : ''}
-        <button type="button" class="btn sm primary" data-act="pdf" ${state === 'data' ? '' : 'disabled'}>Export PDF</button>
+        ${this.tab === 'golive' ? `${state === 'data' ? '<button type="button" class="btn sm" data-act="copy">Salin Ringkasan</button>' : ''}
+        <button type="button" class="btn sm primary" data-act="pdf" ${state === 'data' ? '' : 'disabled'}>Export PDF</button>` : ''}
       </div>`;
   },
   dropdown(key, prefix, value, disabled, menu){
@@ -664,6 +721,86 @@ const ReportModule = {
     return verdictCard + stats + table + reopen + this.criteriaDetails();
   },
 
+  /* ---- QA tab: where testing is stuck (retest queue, daily trend, untested) ---- */
+  qaView(tcs, bugs){
+    const q = ReportCalc.qaStats(tcs, bugs);
+    const days = n => n < 1 ? '< 1 hari' : `${Math.floor(n)} hari`;
+    const sevCls = s => s === 'Critical' ? ' rpt-sev-crit' : s === 'High' ? ' rpt-sev-high' : '';
+    const delta = q.runWeek - q.runPrevWeek;
+    const stats = `
+      <section class="rpt-stats">
+        <div class="rpt-card rpt-stat">
+          <div class="rpt-stat-label">Menunggu retest</div>
+          <div class="rpt-num">${q.retest.length}</div>
+          <div class="rpt-stat-foot">${q.retest.length ? `${q.retestLate} lewat ${ReportCalc.RETEST_LATE_DAYS} hari · terlama ${days(q.retest[0].ageDays)}` : 'Tidak ada bug yang menunggu QA'}</div>
+        </div>
+        <div class="rpt-card rpt-stat">
+          <div class="rpt-stat-label">Dieksekusi 7 hari terakhir</div>
+          <div class="rpt-num">${q.runWeek}</div>
+          <div class="rpt-stat-foot">${delta === 0 ? 'Sama dengan' : `${delta > 0 ? '+' : ''}${delta} dibanding`} 7 hari sebelumnya</div>
+        </div>
+        <div class="rpt-card rpt-stat">
+          <div class="rpt-stat-label">Bug baru 7 hari terakhir</div>
+          <div class="rpt-num">${q.bugsWeek}</div>
+          <div class="rpt-stat-foot">Dari ${bugs.length} bug dalam scope ini</div>
+        </div>
+        <div class="rpt-card rpt-stat">
+          <div class="rpt-stat-label">Belum pernah dijalankan</div>
+          <div class="rpt-num">${q.notRun}<small>/${tcs.length}</small></div>
+          <div class="rpt-stat-foot">${q.staleRun} test lama tidak dijalankan (&gt; ${ReportCalc.STALE_DAYS} hari)</div>
+        </div>
+      </section>`;
+
+    const retest = `
+      <section class="rpt-card rpt-section">
+        <div class="rpt-block-head"><div><h2>Antrian retest</h2><div class="rpt-hint">Bug berstatus ${ReportCalc.WAITING_QA.join(' / ')}: sudah diperbaiki developer, menunggu dicek QA. Terlama di atas.</div></div></div>
+        ${q.retest.length ? `<div class="rpt-reopen-list">${q.retest.map(x => `
+          <button type="button" class="rpt-reopen-row" data-act="bug" data-id="${escapeHtml(x.bug.id)}">
+            <span class="rpt-mono rpt-dim rpt-reopen-id">${escapeHtml(bugCode(x.bug))}</span>
+            <span class="rpt-reopen-text"><b>${escapeHtml(x.bug.title || '')}</b><span>${escapeHtml(ReportCalc.moduleOf(x.bug))} · Tester: ${escapeHtml(x.bug.tester || '-')}</span></span>
+            <span class="rpt-sev${sevCls(x.bug.severity)}">${escapeHtml(x.bug.severity || '-')}</span>
+            <span class="rpt-mono rpt-b rpt-reopen-count${x.ageDays > ReportCalc.RETEST_LATE_DAYS ? ' rpt-t-nogo' : ''}">${days(x.ageDays)}</span>
+          </button>`).join('')}</div>` : `
+          <div class="rpt-positive">
+            <span class="rpt-positive-icon">${RPT_ICON.check}</span>
+            <div><b>Antrian retest kosong</b><span>Semua bug yang sudah diperbaiki sudah dicek QA.</span></div>
+          </div>`}
+      </section>`;
+
+    const max = Math.max(1, ...q.trend.map(d => d.passed + d.failed + d.other));
+    const h = n => `${n / max * 100}%`;
+    const trend = `
+      <section class="rpt-card rpt-section">
+        <div class="rpt-block-head"><div><h2>Tren eksekusi ${ReportCalc.TREND_DAYS} hari</h2><div class="rpt-hint">Test case per tanggal eksekusi terakhir · angka bawah = bug baru hari itu</div></div>
+          <div class="rpt-legend"><span><i class="rpt-key-pass"></i>Passed</span><span><i class="rpt-key-fail"></i>Failed</span><span><i class="rpt-key-other"></i>Lainnya</span></div></div>
+        <div class="rpt-trend">${q.trend.map(d => { const run = d.passed + d.failed + d.other; return `
+          <div class="rpt-trend-day" title="${formatDate(d.key)}: ${run} dieksekusi (${d.passed} Passed, ${d.failed} Failed, ${d.other} lainnya), ${d.newBugs} bug baru">
+            <span class="rpt-trend-n rpt-mono">${run || ''}</span>
+            <div class="rpt-trend-col"><span class="rpt-key-other" style="height:${h(d.other)}"></span><span class="rpt-key-fail" style="height:${h(d.failed)}"></span><span class="rpt-key-pass" style="height:${h(d.passed)}"></span></div>
+            <span class="rpt-trend-date">${Number(d.key.slice(8))}</span>
+            <span class="rpt-trend-bug rpt-mono${d.newBugs ? ' on' : ''}">${d.newBugs}</span>
+          </div>`; }).join('')}</div>
+      </section>`;
+
+    const stale = `
+      <section class="rpt-card rpt-section">
+        <div class="rpt-block-head"><div><h2>Test case belum / lama tidak dijalankan</h2><div class="rpt-hint">Per module · lama = terakhir dijalankan lebih dari ${ReportCalc.STALE_DAYS} hari lalu</div></div></div>
+        ${q.stale.length ? `<div class="rpt-table-wrap"><table class="rpt-table rpt-table-sm">
+          <thead><tr><th>Module</th><th class="rpt-r">Belum jalan</th><th class="rpt-r">&gt; ${ReportCalc.STALE_DAYS} hari</th><th class="rpt-r">Total</th><th class="rpt-r">Terakhir dijalankan</th></tr></thead>
+          <tbody>${q.stale.map(m => `<tr>
+            <td class="rpt-td-name">${escapeHtml(m.module)}</td>
+            <td class="rpt-num-cell">${m.notRun}</td><td class="rpt-num-cell">${m.stale}</td><td class="rpt-num-cell">${m.total}</td>
+            <td class="rpt-num-cell">${m.lastRun ? formatDate(m.lastRun) : '-'}</td></tr>`).join('')}</tbody>
+        </table></div>` : `
+          <div class="rpt-positive">
+            <span class="rpt-positive-icon">${RPT_ICON.check}</span>
+            <div><b>Semua test case baru dijalankan</b><span>Tidak ada test yang belum jalan atau lebih dari ${ReportCalc.STALE_DAYS} hari tidak dijalankan.</span></div>
+          </div>`}
+      </section>`;
+
+    return stats + retest + trend + stale;
+  },
+
   async copySummary(){
     const { biz, scope } = this._last;
     const text = [`Kesiapan go-live untuk: ${scope}`, '', biz.verdictText, '', ...biz.points.map(p => `• ${p}`), '', 'Langkah selanjutnya:', ...biz.nextSteps.map((p, i) => `${i + 1}. ${p}`)].join('\n');
@@ -820,6 +957,7 @@ const ReportModule = {
       const v = el.dataset.value;
       switch (el.dataset.act){
         case 'toggle': this.open = this.open === el.dataset.dd ? null : el.dataset.dd; this.render(); break;
+        case 'tab': this.tab = v; this.open = null; this.renderNow(); break;
         case 'pick-module': this.setFilters({ module: v }); break;
         case 'pick-round': this.setFilters({ fileId: v }); break;
         case 'reset': this.setFilters({ module: '', fileId: this.ALL_FILES }); break;
