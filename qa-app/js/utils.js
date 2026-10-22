@@ -311,6 +311,22 @@ const BUG_FORM = {
   PLATFORMS: ['Web', 'Mobile App', 'Desktop', 'API'],
   ENVIRONMENTS: ['Local', 'Development', 'Staging', 'UAT', 'Production'],
   PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
+  // Fix deadline per Priority, in days from Report Date (mirrors ReportCalc.SLA_DAYS per severity).
+  SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
+  /* bug.dueDate (YYYY-MM-DD, set by PM in the form) wins, due end of that day.
+     Empty = derived from Priority, so changing Priority moves it automatically.
+     Unknown/empty priority counts as Medium. Returns ISO string, '' without reportDate. */
+  dueDate(bug){
+    if (bug && /^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
+    if (!bug || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';
+    const days = this.SLA_DAYS[normPriority(bug.priority)] || this.SLA_DAYS.Medium;
+    return new Date(new Date(bug.reportDate).getTime() + days * 864e5).toISOString();
+  },
+  // Overdue = past due date and not finished (Closed / Rejected, same as Report page).
+  isOverdue(bug, now = Date.now()){
+    const due = this.dueDate(bug);
+    return !!due && !['Closed', 'Rejected'].includes(bug.status) && new Date(due).getTime() < now;
+  },
   // Browser only matters on Web, Device only on Mobile App.
   conditionalFields(platform){ return { browser: platform === 'Web', device: platform === 'Mobile App' }; },
   /* d: form values as plain text. full = create (every required field);
@@ -549,15 +565,15 @@ function bindBackdropClose(overlay, onClose){
 }
 
 // Read-only notice with a bullet list (e.g. import errors). Closes via ✕ or backdrop.
-function listDialog(title, items, message = ''){
+function listDialog(title, items, message = '', ok = false){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay confirm-modal active';
   overlay.innerHTML = `
     <div class="modal">
       <button class="close-x" style="float:right;">✕</button>
-      <div class="icon-warn">!</div>
+      ${ok ? '<div class="icon-warn icon-ok">✓</div>' : '<div class="icon-warn">!</div>'}
       <h2 style="margin:0 0 6px;">${escapeHtml(title)}</h2>
-      <ul class="confirm-list">${items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      ${items.length ? `<ul class="confirm-list">${items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
       ${message ? `<p class="text-dim" style="font-size:13px;">${escapeHtml(message)}</p>` : ''}
     </div>`;
   document.body.appendChild(overlay);

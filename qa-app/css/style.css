@@ -520,6 +520,7 @@ input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:point
 .checklist-dialog-item:last-child{border-bottom:none;}
 .checklist-dialog-item:hover{background:var(--surface-alt);}
 .confirm-modal .icon-warn{width:46px; height:46px; border-radius:50%; background:var(--status-failed-bg); color:var(--status-failed); display:flex; align-items:center; justify-content:center; margin:0 auto 12px; font-size:22px;}
+.confirm-modal .icon-ok{background:var(--status-passed-bg); color:var(--status-passed);}
 
 /* ============ TOAST ============ */
 .toast-stack{position:fixed; right:20px; top:20px; z-index:200; display:flex; flex-direction:column; gap:10px; align-items:flex-end;}
@@ -985,6 +986,27 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .rpt-positive > div{display:flex; flex-direction:column; gap:2px;}
 .rpt-positive > div span{font-size:14px; color:var(--r-dim);}
 .rpt-positive-icon{flex:none; width:44px; height:44px; border-radius:12px; background:var(--r-go-bg); color:var(--r-go-tx); display:flex; align-items:center; justify-content:center;}
+
+/* Tabs: Go-Live (PM/BA) | QA */
+.rpt-tabs{display:inline-flex; padding:3px; gap:2px; border-radius:10px; background:var(--r-neu-bg);}
+.rpt-tab{min-height:34px; padding:0 14px; border:0; border-radius:8px; background:transparent; font:inherit; font-size:13px; font-weight:700; color:var(--r-dim); cursor:pointer;}
+.rpt-tab.on{background:var(--r-card); color:var(--r-text); box-shadow:0 1px 3px rgba(20,23,31,.12);}
+.rpt-tab:focus-visible{outline:2px solid var(--r-accent); outline-offset:2px;}
+
+/* QA tab: daily trend (stacked columns) */
+.rpt-legend{display:flex; gap:14px; font-size:13px; color:var(--r-dim);}
+.rpt-legend span{display:inline-flex; align-items:center; gap:6px;}
+.rpt-legend i{width:10px; height:10px; border-radius:3px;}
+.rpt-key-pass{background:var(--r-go-bar);} .rpt-key-fail{background:var(--r-nogo-bar);} .rpt-key-other{background:var(--r-cond-bar);}
+.rpt-trend{display:grid; grid-template-columns:repeat(14, minmax(22px, 1fr)); gap:6px; overflow-x:auto;}
+.rpt-trend-day{display:flex; flex-direction:column; align-items:center; gap:4px;}
+.rpt-trend-n{font-size:11.5px; color:var(--r-dim); min-height:15px;}
+.rpt-trend-col{width:100%; max-width:34px; height:140px; display:flex; flex-direction:column; justify-content:flex-end; gap:1px; border-radius:6px; background:var(--r-track); overflow:hidden;}
+.rpt-trend-col span{display:block; width:100%;}
+.rpt-trend-date{font-size:12px; color:var(--r-dim);}
+.rpt-trend-bug{font-size:11.5px; color:var(--r-faint);}
+.rpt-trend-bug.on{color:var(--r-nogo-tx); font-weight:700;}
+.rpt-table-sm{min-width:520px;}
 
 /* Phone (< 640px) */
 @media (max-width:640px){

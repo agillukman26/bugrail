@@ -55,3 +55,22 @@ assert.strictEqual(normPriority('Critical'), 'Urgent');
 assert.strictEqual(normPriority('High'), 'High');
 
 console.log('bugform.check.js OK');
+
+// Due date = reportDate + SLA days by Priority (Critical/Highest -> Urgent, unknown -> Medium)
+const rd = '2026-01-01T00:00:00.000Z';
+assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Urgent' }), '2026-01-02T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Critical' }), '2026-01-02T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'High' }), '2026-01-04T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Low' }), '2026-01-15T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ reportDate: rd }), '2026-01-08T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ priority: 'High' }), '');
+const later = new Date('2026-01-10').getTime();
+assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'High', status: 'Open' }, later), true);
+assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'High', status: 'Closed' }, later), false);
+assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'Low', status: 'Open' }, later), false);
+// Manual dueDate (PM) overrides SLA; due end of that local day
+const manual = F.dueDate({ reportDate: rd, priority: 'Low', dueDate: '2026-01-03' });
+assert.strictEqual(new Date(manual).getDate(), 3);
+assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'Low', dueDate: '2026-01-03', status: 'Open' }, later), true);
+assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'High', dueDate: '' }), '2026-01-04T00:00:00.000Z');
+console.log('due date ok');

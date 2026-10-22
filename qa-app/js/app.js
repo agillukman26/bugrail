@@ -400,7 +400,8 @@ const App = {
 
     // Keyboard shortcuts: N = new item on current page, Ctrl/Cmd+S = manual "save" toast (data is autosaved).
     document.addEventListener('keydown', e => {
-      const typing = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
+      // isContentEditable: the Quill step editor is a contenteditable div, not an input.
+      const typing = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){
         e.preventDefault();
         Toast.show('Semua perubahan tersimpan otomatis di Local Storage.', 'success');
