@@ -206,6 +206,7 @@ const BugReportModule = {
         <td>${this.statusBadge(b.status)}</td>
         <td>${escapeHtml(b.tester || '-')}</td>
         <td>${formatDate(b.reportDate)}</td>
+        <td>${this.dueDateHtml(b)}</td>
         <td class="cell-actions">
           ${actionMenu(`
             <button data-act="view" data-id="${b.id}">👁 Lihat Detail</button>
@@ -221,6 +222,21 @@ const BugReportModule = {
     this.renderPagination(totalPages);
     this.bindRowEvents();
     document.getElementById('bugSelectAll').checked = pageRows.length > 0 && pageRows.every(r => this.ui.selected.has(r.id));
+  },
+
+  // Priority SLA due date for the open form, as YYYY-MM-DD (local) for <input type=date>.
+  autoDueDay(priority){
+    const iso = BUG_FORM.dueDate({ reportDate: this.ui.formReportDate, priority });
+    if (!iso) return '';
+    const d = new Date(iso), p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  },
+  dueDateHtml(b){
+    const due = BUG_FORM.dueDate(b);
+    if (!due) return '-';
+    return BUG_FORM.isOverdue(b)
+      ? `<span style="color:var(--sev-critical); font-weight:600;" title="Lewat SLA">${formatDate(due)} ⚠</span>`
+      : formatDate(due);
   },
 
   renderFileList(){
@@ -685,6 +701,8 @@ const BugReportModule = {
     document.getElementById('bugFieldDate').value = formatDateTime(bug ? bug.reportDate : nowISO());
 
     this.fillSelect(f.priority, BUG_FORM.PRIORITIES, bug ? bug.priority : '', '— Pilih Priority —');
+    this.ui.formReportDate = bug ? bug.reportDate : nowISO();
+    f.dueDate.value = (bug && bug.dueDate) || this.autoDueDay(f.priority.value);
     this.fillSelect(f.environment, BUG_FORM.ENVIRONMENTS, bug ? bug.environment : '', '— Pilih Environment —');
     // Bugs saved before Platform existed: infer it from Browser / Device (not written back until saved).
     const platform = bug ? (bug.platform || (bug.device && !bug.browser ? 'Mobile App' : bug.browser ? 'Web' : '')) : '';
@@ -778,7 +796,7 @@ const BugReportModule = {
      can only change Status & Priority — every other field is disabled. */
   applyFormFieldLock(){
     const f = document.getElementById('bugForm');
-    const keepEnabled = ['status', 'priority'];
+    const keepEnabled = ['status', 'priority', 'dueDate'];
     Array.from(f.elements).forEach(el => {
       if (!el.name) return;
       el.disabled = this.ui.limitedEdit && !keepEnabled.includes(el.name);
@@ -941,6 +959,8 @@ const BugReportModule = {
       tester: f.tester.value.trim(),
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
+      // Same as the Priority SLA date -> store '' so it keeps following Priority.
+      dueDate: f.dueDate.value === this.autoDueDay(f.priority.value) ? '' : f.dueDate.value,
       environment: f.environment.value, buildVersion: f.buildVersion.value.trim(),
       platform: f.platform.value, os: f.os.value.trim(),
       // A new bug doesn't keep Browser / Device its platform doesn't use.
@@ -1086,6 +1106,7 @@ const BugReportModule = {
         // takes the sheet's name, unless it's a generic "Sheet1"/"Template".
         let count = 0, sheetsUsed = 0;
         const unknownTc = new Set();
+        const skipped = []; // { sheet, row, fields } per row missing a required field
         wb.SheetNames.forEach(sheetName => {
           const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
           const sheetModule = /^(sheet\s*\d*|template)$/i.test(sheetName.trim()) ? '' : sheetName.trim();
@@ -1101,7 +1122,11 @@ const BugReportModule = {
             const title = r['Bug Title'] || r.title;
             // Blank Actual Result: take the one written when the test case was run.
             const actualResult = r['Actual Result'] || r.actualResult || (tc && tc.actualResult) || '';
-            if (!title || !actualResult) return;
+            if (!title || !actualResult){
+              const fields = [!title && 'Bug Title', !actualResult && 'Actual Result'].filter(Boolean);
+              skipped.push({ sheet: sheetName, row: raw.__rowNum__ + 1, fields }); // __rowNum__ = SheetJS 0-based row
+              return;
+            }
             // Text identical to the test case (pre-filled template) counts as "from the test case".
             const same = (v, src) => tc && String(v || '').trim() === String(src || '').trim();
             let ownSteps = r['Test Steps'] || r.steps, ownExpected = r['Expected Result'] || r.expectedResult;
@@ -1138,11 +1163,23 @@ const BugReportModule = {
         App.saveBugs();
         ActivityLog.record('bugreport_create', `${count} bug report di-import dari ${sheetsUsed} sheet`);
         this.render();
-        Toast.show(`${count} bug report dari ${sheetsUsed} sheet berhasil di-import.`, count ? 'success' : 'info');
-        if (unknownTc.size) Toast.show(`Test Case ID tidak ditemukan (bug tetap di-import tanpa link): ${[...unknownTc].slice(0, 5).join(', ')}${unknownTc.size > 5 ? ` +${unknownTc.size - 5}` : ''}`, 'error');
+        const okMsg = `${count} bug report dari ${sheetsUsed} sheet berhasil di-import.`;
+        const unknownMsg = `Test Case ID tidak ditemukan (bug tetap di-import tanpa link): ${[...unknownTc].slice(0, 5).join(', ')}${unknownTc.size > 5 ? ` +${unknownTc.size - 5}` : ''}`;
+        // One centered popup for every outcome: per-row detail for 1-5 failed rows,
+        // else one line per module, or one line if nothing was imported.
+        const join = list => [...new Set(list)].join(' & ');
+        const bySheet = {};
+        skipped.forEach(s => (bySheet[s.sheet] = bySheet[s.sheet] || []).push(...s.fields));
+        const items = skipped.length <= 5
+          ? skipped.map(s => `${s.sheet} baris ${s.row}: ${join(s.fields)} belum diisi`)
+          : !count ? [`Semua module: ${join(skipped.flatMap(s => s.fields))} belum diisi`]
+          : Object.entries(bySheet).map(([sheet, f]) => `${sheet}: ${join(f)} belum diisi`);
+        if (unknownTc.size) items.push(unknownMsg);
+        const title = skipped.length ? `${skipped.length} baris tidak di-import` : count ? 'Import berhasil' : 'Tidak ada data di-import';
+        listDialog(title, items, okMsg, count > 0 && !items.length);
       }catch(err){
         console.error(err);
-        Toast.show('Gagal membaca file. Pastikan format sesuai template.', 'error');
+        listDialog('Gagal membaca file', [], 'Pastikan format sesuai template.');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1280,6 +1317,8 @@ const BugReportModule = {
       if (this.TC_FIELDS.includes(e.target.name)){ this.ui.tcEdited.add(e.target.name); this.refreshTcHints(); }
     });
     f.platform.addEventListener('change', () => this.updatePlatformFields());
+    // PM re-rates Priority (e.g. after talking to dev): Due Date jumps to the new SLA, still editable.
+    f.priority.addEventListener('change', () => { f.dueDate.value = this.autoDueDay(f.priority.value); });
     f.title.addEventListener('input', debounce(() => this.showSimilar(), 500));
     Object.entries(this.TC_COPIES).forEach(([flag, name]) => {
       const el = f[name];
