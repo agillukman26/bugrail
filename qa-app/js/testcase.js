@@ -200,7 +200,7 @@ const TestCaseModule = {
         <td class="truncate" title="${escapeHtml(tc.roleUser)}">${escapeHtml(tc.roleUser || '-')}</td>
         <td class="truncate" title="${escapeHtml(tc.scenario)}">${escapeHtml(tc.scenario)}</td>
         <td class="truncate" title="${escapeHtml(tc.testCase)}">${escapeHtml(tc.testCase || '-')}</td>
-        <td>${escapeHtml(tc.typeTest || '-')}</td>
+        <td class="center">${tc.typeTest ? `<span class="badge type-${tc.typeTest === 'Negative' ? 'neg' : 'pos'}">${escapeHtml(tc.typeTest)}</span>` : '-'}</td>
         <td>${this.statusBadge(tc.status)}</td>
         <td>${this.evidenceCell(tc.evidence)}</td>
         <td class="col-hidden">${formatDate(tc.executionDate)}</td>
@@ -402,6 +402,7 @@ const TestCaseModule = {
     const all = this.uniqueValues('module');
     const q = query.trim().toLowerCase();
     const filtered = q ? all.filter(m => m.toLowerCase().includes(q)) : all;
+    this.ui.moduleActive = -1;
     if (!filtered.length){
       listEl.innerHTML = `<div class="combobox-empty">
         <div class="combobox-empty-icon">📥</div>
@@ -416,7 +417,43 @@ const TestCaseModule = {
         this.setModule(el.dataset.module);
         document.getElementById('tcModuleDropdown').classList.remove('open');
       });
+      el.addEventListener('mousemove', () => this.setModuleActive([...listEl.children].indexOf(el)));
     });
+    // Searching -> first match; otherwise the current module.
+    const cur = filtered.indexOf(document.getElementById('tcForm').module.value);
+    this.setModuleActive(q || cur < 0 ? 0 : cur);
+  },
+  setModuleActive(i){
+    const all = [...document.querySelectorAll('#tcModuleList [data-module]')];
+    if (!all.length) return;
+    this.ui.moduleActive = (i + all.length) % all.length;
+    all.forEach((o, n) => o.classList.toggle('active', n === this.ui.moduleActive));
+    all[this.ui.moduleActive].scrollIntoView({ block: 'nearest' });
+  },
+  // Keyboard on the search box: ↑/↓ highlight, Enter picks (no match = add the typed module), Esc closes.
+  onModuleSearchKey(e){
+    const dd = document.getElementById('tcModuleDropdown');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault();
+      this.setModuleActive(this.ui.moduleActive + (e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === 'Enter'){
+      e.preventDefault();
+      const o = document.querySelectorAll('#tcModuleList [data-module]')[this.ui.moduleActive];
+      if (o){ this.setModule(o.dataset.module); dd.classList.remove('open'); document.getElementById('tcModuleTrigger').focus(); }
+      else if (e.target.value.trim()) this.addNewModule();
+    } else if (e.key === 'Escape'){
+      e.preventDefault(); e.stopPropagation();
+      dd.classList.remove('open'); document.getElementById('tcModuleTrigger').focus();
+    }
+  },
+  // Typing on the focused (closed) trigger opens it and starts the search with that key.
+  onModuleTriggerKey(e){
+    const dd = document.getElementById('tcModuleDropdown');
+    const printable = e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (dd.classList.contains('open') || !(printable || e.key === 'ArrowDown')) return;
+    e.preventDefault();
+    dd.classList.add('open');
+    this.openModuleCombobox(printable ? e.key : '');
   },
   showModuleError(msg){
     const el = document.getElementById('tcModuleError');
@@ -424,10 +461,12 @@ const TestCaseModule = {
     el.style.display = msg ? 'block' : 'none';
     document.getElementById('tcModuleDropdown').classList.toggle('invalid', !!msg);
   },
-  openModuleCombobox(){
-    document.getElementById('tcModuleSearch').value = '';
+  openModuleCombobox(seed = ''){
+    const search = document.getElementById('tcModuleSearch');
+    search.value = seed;
     this.showModuleError('');
-    this.renderModuleList('');
+    this.renderModuleList(seed);
+    setTimeout(() => search.focus(), 0); // after the shared dropdown toggle
   },
   moduleExists(name){
     return this.uniqueValues('module').some(m => m.toLowerCase() === name.toLowerCase());
@@ -891,6 +930,8 @@ const TestCaseModule = {
     document.getElementById('runForm').addEventListener('submit', e => this.submitExecute(e));
     document.getElementById('tcTranslateFileBtn').addEventListener('click', () => this.translateActiveFile());
     document.getElementById('tcModuleTrigger').addEventListener('click', () => this.openModuleCombobox());
+    document.getElementById('tcModuleTrigger').addEventListener('keydown', e => this.onModuleTriggerKey(e));
+    document.getElementById('tcModuleSearch').addEventListener('keydown', e => this.onModuleSearchKey(e));
     document.getElementById('tcModuleSearch').addEventListener('input', e => { this.showModuleError(''); this.renderModuleList(e.target.value); });
     document.getElementById('tcModuleAddBtn').addEventListener('click', () => this.addNewModule());
     document.getElementById('tcSearchInput').addEventListener('input', debounce(e => this.setSearch(e.target.value), 200));
