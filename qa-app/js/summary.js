@@ -482,6 +482,9 @@ const Summary = {
   },
 
   bindStaticEvents(){
+    searchableSelect(document.getElementById('sumFilterFile'), 'Cari file...');
+    searchableSelect(document.getElementById('sumFilterModule'), 'Cari module...');
+    searchableSelect(document.getElementById('sumFilterTester'), 'Cari tester...');
     ['sumFilterFile','sumFilterModule','sumFilterTester'].forEach(id => {
       document.getElementById(id).addEventListener('change', e => {
         const map = { sumFilterFile:'fileId', sumFilterModule:'module', sumFilterTester:'tester' };

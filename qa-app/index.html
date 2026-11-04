@@ -6,7 +6,7 @@
 <title>QA Test Management &amp; Bug Tracking</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐞</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="css/style.css?v=50">
+<link rel="stylesheet" href="css/style.css?v=56">
 <!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
      Core app + data storage still work fully offline once these have loaded once. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -222,7 +222,7 @@
                 <th class="sortable" data-key="roleUser">Role User <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="scenario">Scenario <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="testCase">Test Case <span class="arrow">↕</span></th>
-                <th class="sortable" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
+                <th class="sortable center" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="evidence">Evidence <span class="arrow">↕</span></th>
                 <th class="sortable col-hidden" data-key="executionDate">Tgl Eksekusi <span class="arrow">↕</span></th>
@@ -924,7 +924,7 @@
         </div>
         <input type="hidden" name="testCaseId" id="bugTestCaseSelect">
       </div>
-      <div class="field" data-field="module"><label>Module <span class="req">*</span></label><input name="module" data-tc-src="module"><p class="field-hint" hidden>Diubah dari test case</p></div>
+      <div class="field" data-field="module"><label>Module <span class="req">*</span></label><input name="module" data-tc-src="module" list="bugModuleOptions" autocomplete="off"><datalist id="bugModuleOptions"></datalist><p class="field-hint" hidden>Diubah dari test case</p></div>
       <div class="field" data-field="scenario"><label>Scenario</label><textarea name="scenario" data-tc-src="scenario"></textarea><p class="field-hint" hidden>Diubah dari test case</p></div>
       <div class="form-row">
         <div class="field" data-field="preconditions"><label>Pre-condition</label><textarea name="preconditions" data-tc-src="preconditions"></textarea><p class="field-hint" hidden>Diubah dari test case</p></div>
@@ -1086,15 +1086,15 @@
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
 <script src="js/utils.js?v=51"></script>
 <script src="js/app.js?v=45"></script>
-<script src="js/activitylog.js?v=7"></script>
+<script src="js/activitylog.js?v=8"></script>
 <script src="js/workspace.js?v=5"></script>
 <script src="js/auth.js?v=29"></script>
 <script src="js/dashboard.js?v=19"></script>
-<script src="js/testcase.js?v=55"></script>
+<script src="js/testcase.js?v=57"></script>
 <script src="js/testforge.js?v=4"></script>
-<script src="js/bugreport.js?v=73"></script>
-<script src="js/summary.js?v=21"></script>
-<script src="js/report.js?v=26"></script>
+<script src="js/bugreport.js?v=75"></script>
+<script src="js/summary.js?v=22"></script>
+<script src="js/report.js?v=27"></script>
 <script src="js/notifications.js?v=5"></script>
 <script src="js/import.js?v=17"></script>
 <script src="js/export.js?v=16"></script>

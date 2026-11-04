@@ -475,6 +475,9 @@ input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:point
 .badge.st-blocked{background:var(--status-blocked-bg); color:var(--status-blocked);}
 .badge.st-notrun{background:var(--status-notrun-bg); color:var(--status-notrun);}
 .badge.st-retest{background:var(--status-retest-bg); color:var(--status-retest);}
+.badge.type-pos{background:none; padding:0; color:var(--status-passed);}
+.badge.type-neg{background:none; padding:0; color:var(--status-failed);}
+table.data-table th.center, table.data-table td.center{text-align:center;}
 .badge.sev-critical{background:var(--sev-critical-bg); color:var(--sev-critical);}
 .badge.sev-high{background:var(--sev-high-bg); color:var(--sev-high);}
 .badge.sev-medium{background:var(--sev-medium-bg); color:var(--sev-medium);}
@@ -710,7 +713,10 @@ input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:point
 .filter-combo-panel{display:flex; flex-direction:column; gap:6px; margin-top:6px; padding:8px; border:1px solid var(--border); border-radius:var(--radius-s); background:var(--surface);}
 .filter-combo-panel[hidden]{display:none;}
 .filter-combo-panel .search-box{min-width:0;}
-.filter-combo .combobox-option.active{background:var(--primary-soft); color:var(--primary);}
+/* In a page toolbar (Summary) the combo sits inline like a plain select; its list floats. */
+.toolbar > .filter-combo{width:auto; min-width:150px; max-width:220px; position:relative;}
+.toolbar > .filter-combo .filter-combo-panel{position:absolute; top:100%; left:0; z-index:30; width:260px; box-shadow:var(--shadow-md, 0 8px 24px rgba(0,0,0,.12));}
+.combobox-option.active{background:var(--primary-soft); color:var(--primary);}
 .combobox-error{color:var(--status-failed); font-size:12px; margin:6px 0 0; padding:0 2px;}
 .input-invalid{border-color:var(--status-failed) !important;}
 .field-error{display:none; color:var(--status-failed); font-size:12px; margin-top:4px;}
@@ -837,6 +843,10 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .rpt-dd-value{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .rpt-dd-prefix{font-weight:500; color:var(--text-dim);}
 .rpt-menu{position:absolute; top:calc(100% + 8px); left:0; width:340px; max-width:86vw; max-height:60vh; overflow-y:auto; background:var(--r-card); border:1px solid var(--r-border); border-radius:14px; box-shadow:0 12px 32px rgba(20,23,31,.14); padding:6px; display:flex; flex-direction:column; gap:2px; font-size:14px; font-weight:400; color:var(--r-text);}
+.rpt-menu-search{position:sticky; top:-6px; z-index:1; margin:0 -6px 4px; padding:8px; background:var(--r-card); border-bottom:1px solid var(--r-border);}
+.rpt-menu-search input{width:100%; padding:8px 10px; border:1px solid var(--r-border); border-radius:10px; background:var(--r-card); color:var(--r-text); font:inherit; font-size:13px;}
+.rpt-opt.active, .rpt-pick-opt.active{background:var(--r-neu-bg);}
+.rpt-opt[hidden], .rpt-pick-opt[hidden]{display:none;}
 .rpt-menu-head{padding:8px 10px 6px; font-size:12px; font-weight:700; color:var(--r-dim); text-transform:uppercase; letter-spacing:.05em;}
 .rpt-opt{display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:44px; padding:6px 10px; border:0; border-radius:10px; background:transparent; text-align:left; font:inherit; color:var(--r-text); cursor:pointer;}
 .rpt-opt:hover:not(:disabled){background:var(--r-neu-bg);}

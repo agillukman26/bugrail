@@ -477,17 +477,31 @@ const ReportModule = {
     const cur = this.filters.module;
     return `
       <div class="rpt-menu" role="listbox" aria-label="Pilih module">
-        <div class="rpt-menu-head">Module di ${escapeHtml(fileName || 'semua putaran')}</div>
+        <div class="rpt-menu-head">Module di ${escapeHtml(fileName || 'semua putaran')}</div>${this.menuSearch('Cari module...')}
         ${this.option('pick-module', '', 'Semua module', `${opts.allModulesCount} test case`, !cur, false)}
         ${opts.modules.map(m => this.option('pick-module', m.name, m.name, m.disabled ? m.why : `${m.count} test case`,
           m.name === cur, m.disabled, m.verdict ? this.chip(m.verdict, 'sm') : '')).join('')}
       </div>`;
   },
+  // Search box on top of a filter menu: typing hides non-matching options, ↑/↓ + Enter picks.
+  menuSearch(placeholder){
+    return `<div class="rpt-menu-search"><input type="text" placeholder="${placeholder}" aria-label="${placeholder}" autocomplete="off"></div>`;
+  },
+  menuOpts(input){
+    return [...input.closest('[role="listbox"]').querySelectorAll('.rpt-opt, .rpt-pick-opt')].filter(o => !o.hidden && !o.disabled);
+  },
+  setMenuActive(input, i){
+    const all = this.menuOpts(input);
+    input.closest('[role="listbox"]').querySelectorAll('.active').forEach(o => o.classList.remove('active'));
+    if (!all.length) return;
+    const o = all[(i + all.length) % all.length];
+    o.classList.add('active'); o.scrollIntoView({ block: 'nearest' });
+  },
   roundMenu(opts){
     const cur = this.filters.fileId;
     return `
       <div class="rpt-menu" role="listbox" aria-label="Pilih putaran testing">
-        <div class="rpt-menu-head">Putaran testing</div>
+        <div class="rpt-menu-head">Putaran testing</div>${this.menuSearch('Cari putaran...')}
         ${this.option('pick-round', this.ALL_FILES, 'Semua putaran testing', `${opts.allRoundsCount} test case`, cur === this.ALL_FILES, false)}
         ${opts.rounds.map(f => this.option('pick-round', f.id, f.name,
           f.disabled ? f.why : `${f.date ? `${formatDate(f.date)} · ` : ''}${f.count} test case`, f.id === cur, f.disabled)).join('')}
@@ -508,7 +522,7 @@ const ReportModule = {
       </button>`;
     const menu = `
       <div class="rpt-pick-menu" role="listbox" aria-label="Pilih file">
-        <div class="rpt-menu-head">${opts.rounds.length} file · ${withData} berisi test case</div>
+        <div class="rpt-menu-head">${opts.rounds.length} file · ${withData} berisi test case</div>${this.menuSearch('Cari file...')}
         ${withData > 1 ? row(this.ALL_FILES, 'Semua file', `Gabungan ${opts.allRoundsCount} test case`, '', 'all', this.filters.fileId === this.ALL_FILES) : ''}
         ${opts.rounds.map(f => row(f.id, f.name,
           [f.date ? formatDate(f.date) : '', f.count ? `${f.count} test case` : '', f.count ? (f.openBugs ? `${f.openBugs} bug terbuka` : 'tanpa bug terbuka') : ''].filter(Boolean).join(' · ') || 'Belum ada test case',
@@ -1048,12 +1062,13 @@ const ReportModule = {
       const el = e.target.closest('[data-act]');
       if (!el || !['module-info', 'bugs-others'].includes(el.dataset.act)) this.closeTip();
       if (!el || el.disabled){
-        if (this.open && !e.target.closest('.rpt-menu')){ this.open = null; this.render(); }
+        if (this.open && !e.target.closest('.rpt-menu, .rpt-pick-menu')){ this.open = null; this.render(); }
         return;
       }
       const v = el.dataset.value;
       switch (el.dataset.act){
-        case 'toggle': this.open = this.open === el.dataset.dd ? null : el.dataset.dd; this.render(); break;
+        case 'toggle': this.open = this.open === el.dataset.dd ? null : el.dataset.dd; this.render();
+          { const s = page.querySelector('.rpt-menu-search input'); if (s) s.focus(); } break;
         case 'tab': this.tab = v; this.open = null; this.renderNow(); break;
         case 'pick-module': this.setFilters({ module: v }); break;
         case 'pick-round': this.setFilters({ fileId: v }); break;
@@ -1071,6 +1086,18 @@ const ReportModule = {
         case 'more': this.toggleMore(el); break;
         case 'expand': this.expanded.has(v) ? this.expanded.delete(v) : this.expanded.add(v); this.render(); break;
       }
+    });
+    page.addEventListener('input', e => {
+      if (!e.target.closest('.rpt-menu-search')) return;
+      const q = e.target.value.trim().toLowerCase();
+      e.target.closest('[role="listbox"]').querySelectorAll('.rpt-opt, .rpt-pick-opt').forEach(o => { o.hidden = !!q && !o.textContent.toLowerCase().includes(q); });
+      this.setMenuActive(e.target, 0);
+    });
+    page.addEventListener('keydown', e => {
+      if (!e.target.closest('.rpt-menu-search')) return;
+      const all = this.menuOpts(e.target), cur = all.findIndex(o => o.classList.contains('active'));
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); this.setMenuActive(e.target, cur + (e.key === 'ArrowDown' ? 1 : -1)); }
+      if (e.key === 'Enter'){ e.preventDefault(); const o = all[cur < 0 ? 0 : cur]; if (o) o.click(); }
     });
     // Close an open filter menu on outside click / Escape. composedPath() still holds
     // the report page even when its click handler already re-rendered the target away.

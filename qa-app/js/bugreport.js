@@ -721,6 +721,9 @@ const BugReportModule = {
     this.ui.editingId = bugId;
     this.ui.formTcId = null;
     this.ui.tcEdited = new Set(); // TC_FIELDS the tester typed in — a test case never overwrites them
+    // Module suggestions (type to filter, ↑/↓ + Enter): modules from test cases and bugs.
+    document.getElementById('bugModuleOptions').innerHTML = [...new Set([...App.state.testcases, ...App.state.bugs].map(x => x.module).filter(Boolean))].sort()
+      .map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
     const f = document.getElementById('bugForm');
     f.reset();
     this.clearFormErrors();
@@ -1399,6 +1402,7 @@ const BugReportModule = {
       this.render();
     });
     searchableSelect(document.getElementById('bugFilterModule'), 'Cari module...');
+    searchableSelect(document.getElementById('bugFilterTester'), 'Cari tester...');
     ['bugFilterModule','bugFilterSeverity','bugFilterPriority','bugFilterStatus','bugFilterTester'].forEach(id => {
       document.getElementById(id).addEventListener('change', e => {
         const map = { bugFilterModule:'module', bugFilterSeverity:'severity', bugFilterPriority:'priority', bugFilterStatus:'status', bugFilterTester:'tester' };

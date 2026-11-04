@@ -151,6 +151,7 @@ const ActivityLogModule = {
     this.ui.filters = { user: '', actionGroup: '' };
     this.ui.page = 1;
     document.getElementById('alFilterAction').value = '';
+    document.getElementById('alFilterAction').dispatchEvent(new Event('change')); // refresh the searchable label
     this.render();
   },
 
@@ -224,6 +225,8 @@ const ActivityLogModule = {
 
   bindStaticEvents(){
     bindPageSize('alPageSize', this);
+    searchableSelect(document.getElementById('alFilterUser'), 'Cari user...');
+    searchableSelect(document.getElementById('alFilterAction'), 'Cari jenis aksi...');
     document.getElementById('alSearchInput').addEventListener('input', debounce(e => {
       this.ui.search = e.target.value; this.ui.page = 1; this.render();
     }, 200));
