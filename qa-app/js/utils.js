@@ -33,6 +33,8 @@ const STORAGE_KEYS = {
 // localhost, a LAN IP, or the deployed VM. Only index.html opened straight from
 // disk (file://) needs an absolute URL — the local server.
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:3001/api' : '/api';
+// Every /api call needs the session token (sessionStorage qa_sid, set at login).
+function authHeaders(extra = {}){ return { ...extra, Authorization: 'Bearer ' + sessionStorage.getItem('qa_sid') }; }
 
 const Storage = {
   cache: {},
@@ -45,7 +47,7 @@ const Storage = {
   offlineBoot: false,
   /* Keys whose latest local change hasn't been confirmed by the server (server
      down, network cut, tab closed mid-request) during an online session. Kept in
-     localStorage so it survives a reload; hydrate() re-sends them instead of
+     localStorage so it survives a reload; flushPending() re-sends them instead of
      letting the older server copy overwrite them. "_v2": markers left by the old
      offline-boot behaviour are ignored instead of re-sent. */
   UNSYNCED_KEY: 'qa_unsynced_v2',
@@ -77,18 +79,34 @@ const Storage = {
   adopt(data){
     this.revs = data._revs || {};
     delete data._revs;
+    delete data._auth;
     this.cache = data;
     this.base = {};
     Object.keys(data).forEach(k => { this.base[k] = JSON.stringify(data[k]); });
   },
 
+  OLD_SERVER_MSG: 'Server versi lama terdeteksi — perubahan tidak dikirim. Muat ulang nanti.',
+  /* A 2xx GET without `_auth` came from a server build that predates server-side auth: it
+     would store our password-less users and wipe every password. Stop writing (local only,
+     unsynced markers kept) for the rest of this page load. */
+  oldServer(){
+    if (!this.offlineBoot) Toast.show(this.OLD_SERVER_MSG, 'error');
+    this.offlineBoot = true;
+    return false;
+  },
+
+  // Resolves 'ok' | 'unauthorized' (401: token missing/expired — local data untouched) | 'offline'.
+  // Merges unsynced local changes into the cache but doesn't send them: flushPending() does,
+  // once a workspace is chosen (x-workspace decides what a non-admin may write).
   async hydrate(){
-    let data;
+    let data, msg = 'Server database tidak terhubung — memakai data lokal (offline). Perubahan TIDAK dikirim ke server; muat ulang saat server kembali.';
     try{
       // Generous: the server's first MongoDB Atlas connect (DNS + TLS) can take several seconds.
-      const res = await fetch(`${API_BASE}/kv`, { signal: AbortSignal.timeout(20000) });
+      const res = await fetch(`${API_BASE}/kv`, { headers: authHeaders(), signal: AbortSignal.timeout(20000) });
+      if (res.status === 401) return 'unauthorized';
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       data = await res.json();
+      if (!data || !data._auth){ msg = this.OLD_SERVER_MSG; throw new Error('server without _auth (old build)'); }
       this.serverOnline = true;
     }catch(e){
       console.error('Storage.hydrate: API unreachable, falling back to localStorage', e);
@@ -101,12 +119,11 @@ const Storage = {
           if (raw) this.cache[key] = JSON.parse(raw);
         }catch(err){ console.error('Storage.hydrate: bad localStorage value', key, err); }
       });
-      Toast.show('Server database tidak terhubung — memakai data lokal (offline). Perubahan TIDAK dikirim ke server; muat ulang saat server kembali.', 'error');
-      return;
+      Toast.show(msg, 'error');
+      return 'offline';
     }
     this.adopt(data);
     const pending = this.unsynced();
-    if (!pending.length) return;
     pending.forEach(key => {
       try{
         const raw = localStorage.getItem(key);
@@ -116,8 +133,43 @@ const Storage = {
         if (raw) this.cache[key] = KvMerge.merge(undefined, JSON.parse(raw), this.cache[key]) ?? this.cache[key];
       }catch(err){ console.error('Storage.hydrate: bad unsynced value', key, err); }
     });
+    // Passwords must not linger in the browser: the server checks them now. newPassword stays:
+    // it is an unsynced password change still waiting for flushPending().
+    const st = this.cache.qa_settings;
+    if (st && Array.isArray(st.users)){
+      st.users.forEach(u => { delete u.password; });
+      try{ localStorage.setItem('qa_settings', JSON.stringify(st)); }catch(e){}
+    }
+    return 'ok';
+  },
+
+  // Re-sends the changes hydrate() merged in. Call once the workspace is set. Resolves how many reached the server.
+  async flushPending(){
+    if (this.offlineBoot) return 0;
+    const pending = this.unsynced();
+    const pw = this.newPasswords();
     const sent = (await Promise.all(pending.map(key => this.push(key)))).filter(Boolean).length;
+    if (pending.includes('qa_settings') && !this.unsynced().includes('qa_settings')) this.forgetNewPasswords(pw);
     if (sent) Toast.show(`${sent} perubahan yang belum tersimpan sudah dikirim ke server.`, 'success');
+    return sent;
+  },
+
+  // [[email, newPassword]] currently waiting in qa_settings.
+  newPasswords(){
+    const users = (this.cache.qa_settings && this.cache.qa_settings.users) || [];
+    return users.filter(u => u && u.newPassword !== undefined).map(u => [u.email, u.newPassword]);
+  },
+  /* The server confirmed a qa_settings write carrying these: it holds them hashed now. Drop them
+     locally (no PUT) only where still unchanged, so an edit made meanwhile isn't lost — else the
+     next settings save re-sends them and could revert a later password change. */
+  forgetNewPasswords(sent){
+    const st = this.cache.qa_settings;
+    const users = (st && st.users) || [];
+    sent.forEach(([email, pw]) => {
+      const u = users.find(x => x && x.email === email);
+      if (u && u.newPassword === pw) delete u.newPassword;
+    });
+    if (st) try{ localStorage.setItem('qa_settings', JSON.stringify(st)); }catch(e){}
   },
 
   /* Re-read every key from the server (another user / tab may have changed it).
@@ -125,9 +177,11 @@ const Storage = {
   async refresh(){
     if (this.offlineBoot || this.hasUnsynced()) return false;
     try{
-      const res = await fetch(`${API_BASE}/kv`, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(`${API_BASE}/kv`, { headers: authHeaders(), signal: AbortSignal.timeout(10000) });
+      if (res.status === 401){ Auth.sessionExpired(); return false; }
       if (!res.ok) return false;
       const data = await res.json();
+      if (!data || !data._auth) return this.oldServer(); // e.g. rolled back, SSE reconnected
       if (this.hasUnsynced()) return false; // a save started while we were waiting
       this.adopt(data);
       return true;
@@ -137,9 +191,11 @@ const Storage = {
   async refreshKey(key){
     if (this.offlineBoot || this.hasUnsynced()) return false;
     try{
-      const res = await fetch(`${API_BASE}/kv/${key}`, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(`${API_BASE}/kv/${key}`, { headers: authHeaders(), signal: AbortSignal.timeout(10000) });
+      if (res.status === 401){ Auth.sessionExpired(); return false; }
       if (!res.ok) return false;
-      const { value, rev } = await res.json();
+      const { value, rev, _auth } = await res.json();
+      if (!_auth) return this.oldServer();
       if (rev === (this.revs[key] || 0) || this.hasUnsynced()) return false;
       this.cache[key] = value;
       this.revs[key] = rev;
@@ -174,17 +230,16 @@ const Storage = {
 
   async sendWithMerge(key, mySeq){
     for (let attempt = 0; attempt < 3; attempt++){
+      if (this.offlineBoot) return false; // old server detected after this PUT was queued: keep it unsynced
       let res, sent;
       try{
         sent = JSON.stringify(this.cache[key]);
         res = await fetch(`${API_BASE}/kv/${key}`, {
           method: 'PUT',
-          headers: {
+          headers: authHeaders({
             'Content-Type': 'application/json',
-            'x-role': Auth.role() || '',
-            'x-workspace': Auth.currentWorkspaceId() || '',
-            'x-can-share': Auth.can('testcase_fileShare') ? '1' : '0'
-          },
+            'x-workspace': Auth.currentWorkspaceId() || ''
+          }),
           body: `{"value":${sent},"rev":${this.revs[key] || 0}}`
         });
       }catch(e){
@@ -201,7 +256,15 @@ const Storage = {
         if (this.seq[key] === mySeq) this.markUnsynced(key, false);
         return true;
       }
-      if (res.status === 409 && body.stale && attempt < 2 && await this.mergeFromServer(key)) continue;
+      if (res.status === 401){
+        // Keep the unsynced marker + localStorage copy: flushPending() re-sends them after re-login.
+        Auth.sessionExpired();
+        return false;
+      }
+      if (res.status === 409 && body.stale && attempt < 2){
+        if (await this.mergeFromServer(key)) continue;
+        if (Auth._expiring || this.offlineBoot) return false; // merge GET got 401 / old server: keep the unsynced marker
+      }
       if (res.status >= 400 && res.status < 500){
         // Rejected (no permission / stale and unmergeable) — retrying as-is won't help.
         if (this.seq[key] === mySeq) this.markUnsynced(key, false);
@@ -218,9 +281,11 @@ const Storage = {
   // Someone saved this key first: fold their version into ours, then the caller re-sends.
   async mergeFromServer(key){
     try{
-      const res = await fetch(`${API_BASE}/kv/${key}`);
+      const res = await fetch(`${API_BASE}/kv/${key}`, { headers: authHeaders() });
+      if (res.status === 401){ Auth.sessionExpired(); return false; }
       if (!res.ok) return false;
-      const { value, rev } = await res.json();
+      const { value, rev, _auth } = await res.json();
+      if (!_auth) return this.oldServer();
       const base = this.base[key] === undefined ? undefined : JSON.parse(this.base[key]);
       const merged = KvMerge.merge(base, this.cache[key], value);
       if (merged === null) return false;
@@ -313,14 +378,18 @@ const BUG_FORM = {
   PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
   // Fix deadline per Priority, in days from Report Date (mirrors ReportCalc.SLA_DAYS per severity).
   SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
-  /* bug.dueDate (YYYY-MM-DD, set by PM in the form) wins, due end of that day.
-     Empty = derived from Priority, so changing Priority moves it automatically.
-     Unknown/empty priority counts as Medium. Returns ISO string, '' without reportDate. */
+  /* bug.dueDate (set by PM in the form) wins: YYYY-MM-DDTHH:mm (local), or legacy
+     YYYY-MM-DD = end of that day. Empty = derived from Priority, so changing Priority
+     moves it automatically. Unknown/empty priority counts as Medium.
+     Returns ISO string, '' without reportDate. */
   dueDate(bug){
     if (bug && /^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
+    if (bug && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(bug.dueDate || '')) return new Date(bug.dueDate).toISOString();
     if (!bug || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';
-    const days = this.SLA_DAYS[normPriority(bug.priority)] || this.SLA_DAYS.Medium;
-    return new Date(new Date(bug.reportDate).getTime() + days * 864e5).toISOString();
+    // Settings > Master > Severity & Priority wins; built-in table for legacy names / outside the app.
+    const lvl = typeof BUG_LEVELS !== 'undefined' && BUG_LEVELS.find('priority', bug.priority);
+    const hours = (lvl && BUG_LEVELS.slaHours(lvl)) || (this.SLA_DAYS[normPriority(bug.priority)] || this.SLA_DAYS.Medium) * 24;
+    return new Date(new Date(bug.reportDate).getTime() + hours * 36e5).toISOString();
   },
   // Overdue = past due date and not finished (Closed / Rejected, same as Report page).
   isOverdue(bug, now = Date.now()){
@@ -365,6 +434,58 @@ const BUG_FORM = {
       const ow = words(b.title), min = Math.min(tw.size, ow.size);
       return min > 0 && [...tw].filter(w => ow.has(w)).length / min >= 0.6;
     });
+  }
+};
+/* Severity / Priority levels from Settings > Master > Severity & Priority
+   (js/masterlevel.js). Bugs store the level *name*; `code` is the master's
+   immutable id. Priority also carries the SLA (slaHours) BUG_FORM.dueDate uses.
+   No colour in the master: badges/charts colour by position in the order. */
+const BUG_LEVELS = {
+  KEYS: { severity: 'bugSeverityMaster', priority: 'bugPriorityMaster' },
+  PALETTE: ['#B0203A', '#D64550', '#D98A2B', '#4E88C7'], // 1st..4th level; the rest grey
+  OTHER: '#6B7280',
+  DEFAULTS: {
+    severity: [
+      { code: 'CRITICAL', name: 'Critical', order: 1 },
+      { code: 'HIGH', name: 'High', order: 2 },
+      { code: 'MEDIUM', name: 'Medium', order: 3 },
+      { code: 'LOW', name: 'Low', order: 4 }
+    ],
+    priority: [
+      { code: 'URGENT', name: 'Urgent', order: 1, slaHours: 24 },
+      { code: 'HIGH', name: 'High', order: 2, slaHours: 72 },
+      { code: 'MEDIUM', name: 'Medium', order: 3, slaHours: 168 },
+      { code: 'LOW', name: 'Low', order: 4, slaHours: 336 }
+    ]
+  },
+  // Sorted by order; built-in defaults until the master has been saved.
+  list(kind){
+    const settings = typeof App !== 'undefined' && App.state && App.state.settings;
+    const stored = settings && settings[this.KEYS[kind]];
+    return (stored && stored.length ? stored : this.DEFAULTS[kind]).slice().sort((a, b) => a.order - b.order);
+  },
+  names(kind){ return this.list(kind).map(l => l.name); },
+  find(kind, name){ return this.list(kind).find(l => l.name === name) || null; },
+  // Rows saved before SLA had hours only carry slaDays.
+  slaHours(l){ return Number(l.slaHours) || Number(l.slaDays) * 24 || 0; },
+  slaLabel(hours){
+    const d = Math.floor(hours / 24), h = hours % 24;
+    return [d ? `${d} hari` : '', h ? `${h} jam` : ''].filter(Boolean).join(' ') || '-';
+  },
+  color(kind, name){
+    const i = this.list(kind).findIndex(l => l.name === name);
+    return this.PALETTE[i] || this.OTHER;
+  },
+  // Donut data per master level (legacy priority names counted under normPriority).
+  distribution(kind, bugs){
+    const list = this.list(kind);
+    const value = b => kind === 'priority' ? normPriority(b.priority) : b.severity;
+    return { labels: list.map(l => l.name), counts: list.map(l => bugs.filter(b => value(b) === l.name).length), colors: list.map((l, i) => this.PALETTE[i] || this.OTHER) };
+  },
+  badge(kind, name){
+    if (!name) return '-';
+    const color = this.color(kind, kind === 'priority' ? normPriority(name) : name);
+    return `<span class="badge" style="color:${color}; background:color-mix(in srgb, ${color} 14%, transparent);"><span class="dot"></span>${escapeHtml(name)}</span>`;
   }
 };
 // Legacy priority values (form used "Critical", dashboard "Highest") read as the current top level.
@@ -564,6 +685,86 @@ function bindBackdropClose(overlay, onClose){
   overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) onClose(); });
 }
 
+/* Makes a filter <select> searchable: the select stays (hidden) as the source of
+   truth — modules keep rebuilding its options and listening to its 'change' —
+   and a trigger + inline search list is shown instead. Inline (not a .dropdown)
+   so it works inside the Filter dropdown panel without closing it. */
+function searchableSelect(select, placeholder = 'Cari...'){
+  const wrap = document.createElement('div');
+  wrap.className = 'combobox filter-combo';
+  wrap.innerHTML = `
+    <button type="button" class="combobox-trigger filter-select"><span class="filter-combo-label"></span><span class="arrow">▾</span></button>
+    <div class="filter-combo-panel" hidden>
+      <div class="search-box"><span>🔎</span><input type="text" placeholder="${escapeHtml(placeholder)}"></div>
+      <div class="combobox-list"></div>
+    </div>`;
+  select.style.display = 'none';
+  select.after(wrap);
+  const trigger = wrap.querySelector('.combobox-trigger');
+  const panel = wrap.querySelector('.filter-combo-panel');
+  const input = panel.querySelector('input');
+  const list = panel.querySelector('.combobox-list');
+  const sync = () => {
+    const opt = select.options[select.selectedIndex];
+    wrap.querySelector('.filter-combo-label').textContent = opt ? opt.textContent : '';
+  };
+  const close = () => { panel.hidden = true; wrap.classList.remove('open'); };
+  const pick = value => {
+    select.value = value;
+    close(); sync();
+    select.dispatchEvent(new Event('change'));
+  };
+  // Keyboard: ↑/↓ moves the highlighted option, Enter picks it.
+  let active = -1;
+  const options = () => [...list.querySelectorAll('.combobox-option')];
+  const setActive = i => {
+    const all = options();
+    if (!all.length){ active = -1; return; }
+    active = (i + all.length) % all.length;
+    all.forEach((o, n) => { o.classList.toggle('active', n === active); o.setAttribute('aria-selected', n === active); });
+    all[active].scrollIntoView({ block: 'nearest' });
+  };
+  const renderList = () => {
+    const q = input.value.trim().toLowerCase();
+    const opts = [...select.options].filter(o => !q || o.value === '' || o.textContent.toLowerCase().includes(q));
+    const hasMatch = opts.some(o => o.value !== '');
+    list.innerHTML = opts.map(o => `<button type="button" class="combobox-option" role="option" tabindex="-1" data-value="${escapeHtml(o.value)}">${escapeHtml(o.textContent)}</button>`).join('') +
+      (q && !hasMatch ? `<div class="combobox-empty"><p>Tidak ditemukan.</p></div>` : '');
+    // Searching -> first match; otherwise start on the current selection.
+    const idx = q ? opts.findIndex(o => o.value !== '') : opts.findIndex(o => o.value === select.value);
+    setActive(idx < 0 ? 0 : idx);
+  };
+  trigger.addEventListener('click', () => {
+    if (!panel.hidden) return close();
+    panel.hidden = false; wrap.classList.add('open');
+    input.value = ''; renderList(); input.focus();
+  });
+  input.addEventListener('input', renderList);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape'){ e.stopPropagation(); close(); trigger.focus(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault();
+      setActive(active + (e.key === 'ArrowDown' ? 1 : -1));
+    }
+    if (e.key === 'Enter'){
+      e.preventDefault();
+      const o = options()[active];
+      if (o) pick(o.dataset.value);
+    }
+  });
+  list.addEventListener('click', e => { const o = e.target.closest('.combobox-option'); if (o) pick(o.dataset.value); });
+  list.addEventListener('mousemove', e => {
+    const o = e.target.closest('.combobox-option');
+    if (o){ const i = options().indexOf(o); if (i !== active) setActive(i); }
+  });
+  document.addEventListener('click', e => { if (!wrap.contains(e.target)) close(); });
+  // Options are rebuilt on every render (and reset sets .value): keep the label current.
+  new MutationObserver(sync).observe(select, { childList: true });
+  select.addEventListener('change', sync);
+  sync();
+  return { sync };
+}
+
 // Read-only notice with a bullet list (e.g. import errors). Closes via ✕ or backdrop.
 function listDialog(title, items, message = '', ok = false){
   const overlay = document.createElement('div');
@@ -600,6 +801,33 @@ function confirmDialog(title, message, confirmLabel = 'Hapus'){
     overlay.querySelector('#cancelConfirm').onclick = () => { overlay.remove(); resolve(false); };
     overlay.querySelector('#okConfirm').onclick = () => { overlay.remove(); resolve(true); };
     bindBackdropClose(overlay, () => { overlay.remove(); resolve(false); });
+  });
+}
+
+/* Form closed with unsaved edits -> Promise<'save'|'discard'|'stay'>.
+   Backdrop / ✕ / Esc = 'stay' (keep editing), the safe default. */
+function unsavedChangesDialog(){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay confirm-modal active';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="icon-warn">!</div>
+        <h2 style="margin:0 0 6px;">Perubahan belum disimpan</h2>
+        <p class="text-dim" style="font-size:13px;">Simpan perubahan, buang, atau lanjut mengedit?</p>
+        <div class="modal-footer" style="justify-content:center; flex-wrap:wrap;">
+          <button class="btn" data-choice="stay">Lanjut Edit</button>
+          <button class="btn danger" data-choice="discard">Buang</button>
+          <button class="btn primary" data-choice="save">Simpan</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const done = choice => { overlay.remove(); document.removeEventListener('keydown', onKey, true); resolve(choice); };
+    const onKey = e => { if (e.key === 'Escape'){ e.stopPropagation(); done('stay'); } };
+    document.addEventListener('keydown', onKey, true);
+    overlay.querySelectorAll('[data-choice]').forEach(btn => { btn.onclick = () => done(btn.dataset.choice); });
+    bindBackdropClose(overlay, () => done('stay'));
+    overlay.querySelector('[data-choice="save"]').focus();
   });
 }
 
@@ -780,6 +1008,9 @@ function checklistDialog(title, options, confirmLabel = 'Simpan'){
 }
 
 /* ---------- Small helpers ---------- */
+// Login name shown in the UI; data keeps the full email (notifications match on it).
+function userName(email){ return String(email || '').split('@')[0]; }
+
 function escapeHtml(str){
   if (str === null || str === undefined) return '';
   return String(str)

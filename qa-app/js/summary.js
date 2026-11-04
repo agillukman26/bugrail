@@ -69,15 +69,15 @@ const Summary = {
   },
 
   renderFilterOptions(){
-    const build = (id, arr, field) => {
+    const build = (id, arr, field, label = v => v) => {
       const el = document.getElementById(id);
       const current = this.filters[field];
       const values = [...new Set(arr.map(x => x[field]).filter(Boolean))].sort();
       el.innerHTML = `<option value="">${el.dataset.label}</option>` +
-        values.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
+        values.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(label(v))}</option>`).join('');
     };
     build('sumFilterModule', TestCaseModule.all(), 'module');
-    build('sumFilterTester', BugReportModule.all(), 'tester');
+    build('sumFilterTester', BugReportModule.all(), 'tester', userName);
 
     const fileEl = document.getElementById('sumFilterFile');
     const curFile = this.filters.fileId;
@@ -100,6 +100,8 @@ const Summary = {
     const failRate = total ? Math.round((failed/total)*100) : 0;
     const pct = (n) => total ? Math.round((n/total)*1000)/10 : 0;
     const resStats = computeBugResolutionStats(bugs);
+    const sevDist = BUG_LEVELS.distribution('severity', bugs);
+    const prioDist = BUG_LEVELS.distribution('priority', bugs);
 
     document.getElementById('sumBody').innerHTML = `
       <div class="sum-section">
@@ -143,22 +145,16 @@ const Summary = {
             <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
           ${this.donutCard('Distribusi Severity', bugs.length, 'Total Bug',
-            ['Critical','High','Medium','Low'],
-            ['Critical','High','Medium','Low'].map(s => bugs.filter(b=>b.severity===s).length),
-            ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'sumDonutSeverity')}
+            sevDist.labels, sevDist.counts, sevDist.colors, 'sumDonutSeverity')}
           ${this.donutCard('Distribusi Priority', bugs.length, 'Total Bug',
-            BUG_FORM.PRIORITIES,
-            BUG_FORM.PRIORITIES.map(p => bugs.filter(b=>normPriority(b.priority)===p).length),
-            ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'sumDonutPriority')}
+            prioDist.labels, prioDist.counts, prioDist.colors, 'sumDonutPriority')}
           ${this.bugPerFileCard()}
         </div>
       </div>
     `;
 
-    const sevCounts = ['Critical','High','Medium','Low'].map(s => bugs.filter(b=>b.severity===s).length);
-    this.donut('sumDonutSeverity', sevCounts, ['#B0203A','#D64550','#D98A2B','#4E88C7']);
-    const prioCounts = BUG_FORM.PRIORITIES.map(p => bugs.filter(b=>normPriority(b.priority)===p).length);
-    this.donut('sumDonutPriority', prioCounts, ['#B0203A','#D64550','#D98A2B','#4E88C7']);
+    this.donut('sumDonutSeverity', sevDist.counts, sevDist.colors);
+    this.donut('sumDonutPriority', prioDist.counts, prioDist.colors);
 
     this._lastData = { total, passed, failed, blocked, notrun, retest, passRate, failRate, bugs, tcs: { totalModules } };
     this._lastTC = tcs;
@@ -308,7 +304,7 @@ const Summary = {
       const testerStats = {};
       bugs.forEach(b => { if (b.tester) testerStats[b.tester] = (testerStats[b.tester]||0) + 1; });
       const topTester = Object.entries(testerStats).sort((a,b) => b[1]-a[1])[0];
-      if (topTester && Object.keys(testerStats).length > 1) findings.push(`Tester dengan bug terbanyak dilaporkan: ${topTester[0]} (${topTester[1]} bug).`);
+      if (topTester && Object.keys(testerStats).length > 1) findings.push(`Tester dengan bug terbanyak dilaporkan: ${userName(topTester[0])} (${topTester[1]} bug).`);
 
       const oldOpen = bugs.filter(b => ['Open','Assigned','Reopened'].includes(b.status) && b.reportDate &&
         (Date.now() - new Date(b.reportDate).getTime()) / 36e5 > 168);
@@ -358,7 +354,7 @@ const Summary = {
       if (f) filterBits.push(`File: ${f.name}`);
     }
     if (this.filters.module) filterBits.push(`Module: ${this.filters.module}`);
-    if (this.filters.tester) filterBits.push(`Tester: ${this.filters.tester}`);
+    if (this.filters.tester) filterBits.push(`Tester: ${userName(this.filters.tester)}`);
     if (this.filters.dateFrom) filterBits.push(`Dari: ${this.filters.dateFrom}`);
     if (this.filters.dateTo) filterBits.push(`Sampai: ${this.filters.dateTo}`);
     doc.setFontSize(9); doc.setTextColor(...dim);
@@ -387,15 +383,13 @@ const Summary = {
 
     y = sectionTitle('Bug Report Summary', y);
     const bugs = d.bugs || [];
+    const sevDist = BUG_LEVELS.distribution('severity', bugs);
     doc.autoTable({
       startY: y,
-      head: [['Total Bug','Critical','High','Medium','Low','Open','Closed']],
+      head: [['Total Bug', ...sevDist.labels, 'Open', 'Closed']],
       body: [[
         bugs.length,
-        bugs.filter(b=>b.severity==='Critical').length,
-        bugs.filter(b=>b.severity==='High').length,
-        bugs.filter(b=>b.severity==='Medium').length,
-        bugs.filter(b=>b.severity==='Low').length,
+        ...sevDist.counts,
         bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length,
         bugs.filter(b=>b.status==='Closed').length
       ]],
@@ -459,10 +453,7 @@ const Summary = {
     const resStats = computeBugResolutionStats(bugs);
     const bugSheet = XLSX.utils.json_to_sheet([{
       'Total Bug': bugs.length,
-      Critical: bugs.filter(b=>b.severity==='Critical').length,
-      High: bugs.filter(b=>b.severity==='High').length,
-      Medium: bugs.filter(b=>b.severity==='Medium').length,
-      Low: bugs.filter(b=>b.severity==='Low').length,
+      ...Object.fromEntries(BUG_LEVELS.list('severity').map(l => [l.name, bugs.filter(b=>b.severity===l.name).length])),
       Open: bugs.filter(b=>['Open','Assigned','Reopened'].includes(b.status)).length,
       Closed: bugs.filter(b=>b.status==='Closed').length,
       'Avg Resolusi (jam)': resStats.avgHours || 0,

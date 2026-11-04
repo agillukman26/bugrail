@@ -704,6 +704,13 @@ input[type="date"].filter-select::-webkit-calendar-picker-indicator{cursor:point
 .combobox-empty{text-align:center; padding:18px 8px; color:var(--text-faint); font-size:12.5px;}
 .combobox-empty-icon{font-size:22px; margin-bottom:6px;}
 .combobox-empty p{color:var(--text-dim); font-weight:600; font-size:13px; margin:0 0 2px;}
+/* Searchable filter select (searchableSelect in utils.js), inline inside the Filter panel */
+.filter-combo .combobox-trigger.filter-select{padding:8px 10px; font-size:12.5px; font-weight:600;}
+.filter-combo-label{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.filter-combo-panel{display:flex; flex-direction:column; gap:6px; margin-top:6px; padding:8px; border:1px solid var(--border); border-radius:var(--radius-s); background:var(--surface);}
+.filter-combo-panel[hidden]{display:none;}
+.filter-combo-panel .search-box{min-width:0;}
+.filter-combo .combobox-option.active{background:var(--primary-soft); color:var(--primary);}
 .combobox-error{color:var(--status-failed); font-size:12px; margin:6px 0 0; padding:0 2px;}
 .input-invalid{border-color:var(--status-failed) !important;}
 .field-error{display:none; color:var(--status-failed); font-size:12px; margin-top:4px;}
@@ -818,6 +825,10 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 
 /* Contextual filter sentence */
 .rpt-toolbar{position:relative; z-index:3; margin-bottom:0;}
+.rpt-back{gap:6px; color:var(--text-dim);}
+.rpt-back:hover{color:var(--primary); border-color:var(--primary); background:var(--primary-soft);}
+.rpt-back svg{transition:transform .15s;}
+.rpt-back:hover svg{transform:translateX(-2px);}
 .rpt-dd{position:relative; max-width:100%;}
 .rpt-dd-trigger{display:inline-flex; align-items:center; gap:4px; max-width:260px; color:var(--text); font-family:inherit; cursor:pointer;}
 .rpt-dd-trigger.on{border-color:var(--r-accent); background:var(--r-accent-soft); color:var(--r-accent-dark);}
@@ -936,6 +947,11 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .rpt-dots li{display:flex; gap:10px;}
 .rpt-dots li::before{content:""; flex:none; width:6px; height:6px; border-radius:50%; background:var(--r-dim); margin-top:8px;}
 .rpt-box-nogo .rpt-dots li::before{background:var(--r-nogo-tx);} .rpt-box-cond .rpt-dots li::before{background:var(--r-cond-tx);}
+.rpt-more{margin-top:-4px;} /* box gap is 10px; pull up so "+ N lainnya" reads as part of the list */
+.rpt-more{align-self:flex-start; border:0; background:transparent; padding:0; font:inherit; font-size:13px; font-weight:600; color:var(--r-accent); min-height:24px; cursor:pointer;}
+.rpt-more:hover{text-decoration:underline;}
+.rpt-more:focus-visible{outline:2px solid var(--r-accent); outline-offset:2px;}
+.rpt-more-list{margin-top:-2px;} .rpt-more-list[hidden]{display:none;} /* .rpt-dots/.rpt-todo set display:flex */
 .rpt-todo li{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;}
 
 /* Stat cards */
@@ -973,6 +989,28 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .rpt-passcell .rpt-mono{width:52px; text-align:right;}
 .rpt-tr-unrated td{background:color-mix(in srgb, var(--r-track) 35%, var(--r-card));}
 .rpt-tr-unrated .rpt-link{margin-left:12px;}
+.rpt-expand{border:0; background:transparent; padding:0; min-height:32px; font:inherit; font-weight:700; color:var(--r-text); cursor:pointer; text-align:left;}
+.rpt-expand:hover{color:var(--r-accent);}
+.rpt-expand:focus-visible,.rpt-info-btn:focus-visible{outline:2px solid var(--r-accent); outline-offset:2px;}
+.rpt-tr-tcs td{padding:0 12px 14px 32px; border-top:0;}
+/* One grid shared by all rows (li = display:contents), full table width; the date column hugs the right edge. */
+.rpt-tc-list{margin:0; padding:0; list-style:none; display:grid; grid-template-columns:90px minmax(0,1fr) max-content; align-items:center; gap:4px 16px; font-size:13px;}
+.rpt-tc-list li > :last-child{text-align:right;}
+.rpt-tc-list li{display:contents;}
+.rpt-tc-list .rpt-tc-head span{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--r-dim, var(--text-dim)); padding-bottom:4px; border-bottom:1px solid var(--border);}
+.rpt-tc-list .badge{justify-self:start;}
+.rpt-tc-list .rpt-link{min-height:28px; font-weight:600; text-align:left;}
+.rpt-tc-at{font-size:12px; white-space:nowrap;}
+.rpt-tip{position:fixed; z-index:1000; max-width:min(280px, calc(100vw - 16px)); padding:8px 10px; border-radius:8px; background:var(--surface); color:var(--text); border:1px solid var(--border); box-shadow:0 8px 20px rgba(20,23,31,.14); font-size:12px; line-height:1.45; display:flex; flex-direction:column; gap:3px;}
+.rpt-tip-list{margin:4px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto;}
+.rpt-tip-list li{display:flex; flex-direction:column;}
+.rpt-tip .rpt-link{border:0; background:transparent; padding:0; font:inherit; font-weight:600; color:var(--text); text-align:left; cursor:pointer;}
+.rpt-tip .rpt-link:hover{color:var(--primary, var(--text)); text-decoration:underline;}
+.rpt-sev-btn{border:0; font-family:inherit; cursor:pointer;}
+.rpt-sev-btn:focus-visible{outline:2px solid var(--r-accent); outline-offset:2px;}
+.rpt-tip-dim{color:var(--text-dim);} /* tip lives on <body>, outside .rpt's --r-* tokens */
+.rpt-td-verdict{white-space:nowrap;}
+.rpt-info-btn{border:0; background:transparent; margin-left:6px; padding:4px; min-width:28px; min-height:28px; font:inherit; font-size:15px; line-height:1; color:var(--r-accent); cursor:pointer; vertical-align:middle;}
 
 /* Reopen list */
 .rpt-reopen-list{display:flex; flex-direction:column; gap:8px;}

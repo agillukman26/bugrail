@@ -384,6 +384,8 @@ const TestCaseModule = {
     }
     this.renderCustomFields(tc ? tc.customFields : null);
     document.getElementById('tcModalOverlay').classList.add('active');
+    // After Quill has normalised the steps HTML (its observer runs async), so an untouched form isn't "dirty".
+    setTimeout(() => { this.ui.formSnapshot = this.formSnapshot(); }, 0);
   },
 
   /* ---- Module combobox (searchable select over existing Module values) ---- */
@@ -466,6 +468,22 @@ const TestCaseModule = {
     return values;
   },
   closeForm(){ document.getElementById('tcModalOverlay').classList.remove('active'); },
+  // Everything the form would save, as one string — compared to detect unsaved edits.
+  formSnapshot(){
+    const f = document.getElementById('tcForm');
+    const fields = [...f.elements].filter(el => el.name).map(el => [el.name, el.value]);
+    return JSON.stringify([fields, stepsEditor.root.innerHTML, this.readCustomFields()]);
+  },
+  isFormDirty(){ return this.ui.formSnapshot !== undefined && this.formSnapshot() !== this.ui.formSnapshot; },
+  /* Click outside the modal: close only if nothing changed; otherwise ask, so a
+     stray click doesn't lose the edit and an unwanted edit isn't saved silently.
+     ✕ / Batal stay a deliberate discard. */
+  async onBackdropClick(){
+    if (!this.isFormDirty()){ this.closeForm(); return; }
+    const choice = await unsavedChangesDialog();
+    if (choice === 'discard') this.closeForm();
+    else if (choice === 'save') document.getElementById('tcForm').requestSubmit();
+  },
 
   /* ---- Translate whole file (ID<->EN) — direction auto-detected per test case ---- */
   async translateActiveFile(){
@@ -523,12 +541,18 @@ const TestCaseModule = {
     if (!data.module || !data.scenario || !data.testCase){
       Toast.show('Module, Scenario, dan Test Case wajib diisi.', 'error'); return;
     }
+    // Executed (anything but Open) needs proof.
+    if (data.status !== 'Open' && !data.evidence){
+      Toast.show('Evidence wajib diisi untuk test case berstatus selain Open.', 'error'); f.evidence.focus(); return;
+    }
     if (this.ui.editingId){
       const idx = App.state.testcases.findIndex(t => t.id === this.ui.editingId);
+      if (data.status !== App.state.testcases[idx].status && data.status !== 'Open') data.lastRunAt = nowISO();
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
       ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`);
       Toast.show(`Test case ${tcCode(App.state.testcases[idx])} diperbarui.`, 'success');
     } else {
+      if (data.status !== 'Open') data.lastRunAt = nowISO();
       const tc = { id: IdGen.uid('TC'), code: this.nextCode(data.module, this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
       App.state.testcases.push(tc);
       ActivityLog.record('testcase_create', `Test Case ${tc.code} dibuat`);
@@ -600,6 +624,7 @@ const TestCaseModule = {
   submitExecute(e){
     e.preventDefault();
     const f = e.target;
+    if (!f.evidence.value.trim()){ Toast.show('Evidence wajib diisi.', 'error'); f.evidence.focus(); return; }
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
     const from = App.state.testcases[idx].status;
     const id = tcCode(App.state.testcases[idx]);
@@ -607,6 +632,7 @@ const TestCaseModule = {
     App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
     App.state.testcases[idx].executionDate = todayISO();
+    App.state.testcases[idx].lastRunAt = nowISO();
     App.saveTestcases();
     if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`);
     this.closeExecute();
@@ -661,12 +687,19 @@ const TestCaseModule = {
 
   bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status || !Auth.can('testcase_update')) return;
-    let changed = 0;
-    App.state.testcases.forEach(t => { if (this.ui.selected.has(t.id) && t.status !== status){ t.status = status; changed++; } });
+    let changed = 0, skipped = 0;
+    App.state.testcases.forEach(t => {
+      if (!this.ui.selected.has(t.id) || t.status === status) return;
+      // Same rule as the form: no evidence, can't leave Open.
+      if (status !== 'Open' && !String(t.evidence || '').trim()){ skipped++; return; }
+      t.status = status; changed++;
+      if (status !== 'Open') t.lastRunAt = nowISO();
+    });
     App.saveTestcases();
     if (changed) ActivityLog.record('testcase_update', `${changed} test case status diubah menjadi ${status} (bulk)`);
     this.render();
-    Toast.show(`Status ${this.ui.selected.size} test case diubah menjadi ${status}.`, 'success');
+    if (skipped) Toast.show(`${changed} test case diubah menjadi ${status}. ${skipped} dilewati karena Evidence kosong.`, changed ? 'info' : 'error');
+    else Toast.show(`Status ${changed} test case diubah menjadi ${status}.`, 'success');
   },
 
   /* ---- Integration: Test Case (Failed) -> Bug Report ---- */
@@ -696,12 +729,13 @@ const TestCaseModule = {
       }
       const rows = sheets.flatMap(s => s.rows);
       const errors = sheets.flatMap(s => s.errors);
-      if (errors.length){
-        const list = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
-        listDialog('Data import tidak sesuai', list, 'Perbaiki file lalu import ulang.');
-        return; // nothing imported until the file is fixed
+      const errorList = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
+      if (!rows.length){
+        if (errors.length) listDialog('Data import tidak sesuai', errorList, 'Tidak ada test case yang di-import. Perbaiki file lalu import ulang.');
+        else Toast.show('Tidak ada test case di file.', 'info');
+        return;
       }
-      if (!rows.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
+      // Valid rows go in; rows with errors are skipped and listed below.
       rows.forEach(r => {
         // Always number imported rows fresh, in file order, per workspace — a
         // "Test Case ID" in the file (often from another workspace/export) is ignored.
@@ -716,9 +750,14 @@ const TestCaseModule = {
       const sheetsUsed = sheets.filter(s => s.rows.length).length;
       App.ensureDefaultFile();
       App.saveTestcases();
-      ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet`);
+      ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet${errors.length ? ' (sebagian baris dilewati karena error)' : ''}`);
       this.render();
-      Toast.show('Berhasil menambahkan file test case.', 'success');
+      if (errors.length){
+        listDialog('Sebagian data tidak di-import', errorList,
+          `${rows.length} test case berhasil di-import. Baris di atas dilewati — perbaiki lalu import ulang baris tersebut saja (baris yang sudah masuk jangan diulang agar tidak dobel).`);
+      } else {
+        Toast.show(`${rows.length} test case berhasil di-import.`, 'success');
+      }
     };
     reader.readAsArrayBuffer(file);
   },
@@ -831,6 +870,7 @@ const TestCaseModule = {
   },
 
   bindStaticEvents(){
+    bindBackdropClose(document.getElementById('tcModalOverlay'), () => this.onBackdropClick());
     bindPageSize('tcPageSize', this);
     stepsEditor = new Quill('#tcStepsEditor', {
       theme: 'snow',
@@ -859,6 +899,7 @@ const TestCaseModule = {
       rows.forEach(r => e.target.checked ? this.ui.selected.add(r.id) : this.ui.selected.delete(r.id));
       this.render();
     });
+    searchableSelect(document.getElementById('tcFilterModule'), 'Cari module...');
     ['tcFilterModule','tcFilterTypeTest','tcFilterStatus'].forEach(id => {
       document.getElementById(id).addEventListener('change', e => {
         const map = { tcFilterModule:'module', tcFilterTypeTest:'typeTest', tcFilterStatus:'status' };

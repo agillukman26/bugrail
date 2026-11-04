@@ -6,7 +6,7 @@
 <title>QA Test Management &amp; Bug Tracking</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐞</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="css/style.css?v=36">
+<link rel="stylesheet" href="css/style.css?v=50">
 <!-- CDN libraries: only used at runtime in the user's own browser (charts, Excel & PDF export).
      Core app + data storage still work fully offline once these have loaded once. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -97,6 +97,7 @@
       <div class="nav-group" id="navGroupMaster">
         <div class="nav-item nav-group-toggle"><span class="icon">🗂</span><span class="nav-label">Master</span> <span class="arrow">▾</span></div>
         <div class="nav-subitem" data-page="masterstatus">Status Bug Report</div>
+        <div class="nav-subitem" data-page="masterlevel">Severity &amp; Priority</div>
         <div class="nav-subitem" data-page="workspace">Workspace</div>
       </div>
       <div class="nav-group" id="navGroupUserManagement" style="display:none;">
@@ -129,8 +130,7 @@
         <input type="text" id="globalSearch" autocomplete="off" placeholder="Cari (tekan / untuk fokus)...">
         <div class="gs-results" id="globalSearchResults" role="listbox"></div>
       </div>
-      <!-- Hidden for now (feature paused). Remove style="display:none" to bring it back. -->
-      <div class="notif-wrap" style="display:none;">
+      <div class="notif-wrap">
         <button class="notif-btn" id="notifBtn" type="button" title="Notifikasi" aria-label="Notifikasi">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           <span class="notif-badge" id="notifBadge" style="display:none;">0</span>
@@ -274,12 +274,12 @@
               <div class="filter-field"><label>Module</label><select class="filter-select" id="bugFilterModule" data-label="Semua Module"></select></div>
               <div class="filter-field"><label>Severity</label>
                 <select class="filter-select" id="bugFilterSeverity" data-label="Semua Severity">
-                  <option value="">Semua Severity</option><option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
+                  <option value="">Semua Severity</option>
                 </select>
               </div>
               <div class="filter-field"><label>Priority</label>
                 <select class="filter-select" id="bugFilterPriority" data-label="Semua Priority">
-                  <option value="">Semua Priority</option><option>Urgent</option><option>High</option><option>Medium</option><option>Low</option>
+                  <option value="">Semua Priority</option>
                 </select>
               </div>
               <div class="filter-field"><label>Status</label>
@@ -476,6 +476,31 @@
         </div>
       </section>
 
+      <!-- ============ MASTER: SEVERITY & PRIORITY ============ -->
+      <section class="page" id="page-masterlevel">
+        <div class="card">
+          <div class="flex-between" style="gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+            <div class="bug-chat-tabs" id="mlTabs" role="tablist" style="margin-bottom:0; flex:1;">
+              <div class="bug-chat-tab active" role="tab" tabindex="0" data-ml-tab="severity">Severity</div>
+              <div class="bug-chat-tab" role="tab" tabindex="0" data-ml-tab="priority">Priority</div>
+            </div>
+            <button class="btn sm primary" id="mlCreateBtn">+ Tambah Severity</button>
+          </div>
+          <div class="table-wrap" data-ml-panel="severity">
+            <table class="data-table">
+              <thead><tr><th>No</th><th>Kode Severity</th><th>Nama Severity</th><th>Urutan</th><th>Aksi</th></tr></thead>
+              <tbody id="mlSeverityBody"></tbody>
+            </table>
+          </div>
+          <div class="table-wrap" data-ml-panel="priority" style="display:none;">
+            <table class="data-table">
+              <thead><tr><th>No</th><th>Kode Priority</th><th>Nama Priority</th><th>SLA</th><th>Urutan</th><th>Aksi</th></tr></thead>
+              <tbody id="mlPriorityBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ ROLE PERMISSION ============ -->
       <section class="page" id="page-rolepermission">
         <div class="card">
@@ -605,7 +630,7 @@
 </div>
 
 <!-- ============ MODAL: Test Case Form ============ -->
-<div class="modal-overlay" id="tcModalOverlay">
+<div class="modal-overlay" id="tcModalOverlay" data-backdrop-guard>
   <div class="modal lg">
     <div class="modal-header">
       <h2 id="tcModalTitle">Tambah Test Case</h2>
@@ -652,7 +677,7 @@
       <div class="field"><label>Expected Result</label><textarea name="expectedResult"></textarea></div>
       <div class="field"><label>Actual Result</label><textarea name="actualResult"></textarea></div>
       <div class="form-row">
-        <div class="field"><label>Evidence</label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti"></textarea></div>
+        <div class="field"><label>Evidence <span class="req" title="Wajib jika status bukan Open">*</span></label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti (wajib jika status bukan Open)"></textarea></div>
         <div class="field"><label>Execution Date</label><input type="date" name="executionDate"></div>
       </div>
       <div id="tcCustomFieldsWrap"></div>
@@ -745,7 +770,7 @@
     <div class="divider"></div>
     <form id="runForm">
       <div class="field"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult" required></textarea></div>
-      <div class="field"><label>Evidence</label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti"></textarea></div>
+      <div class="field"><label>Evidence <span class="req">*</span></label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti" required></textarea></div>
       <div class="field"><label>Status <span class="req">*</span></label>
         <select name="status" required><option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option></select>
       </div>
@@ -824,8 +849,48 @@
   </div>
 </div>
 
+<!-- ============ MODAL: Severity / Priority Form ============ -->
+<div class="modal-overlay" id="mlModalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="mlModalTitle">Tambah Severity</h2>
+      <button class="close-x" data-close="mlModalOverlay">✕</button>
+    </div>
+    <input type="hidden" id="mlEditCode">
+    <div class="form-row">
+      <div class="field">
+        <label id="mlCodeLabel">Kode</label>
+        <input type="text" id="mlCode" readonly placeholder="Dibuat otomatis, jadi ID master, tidak berubah walau nama diedit">
+      </div>
+      <div class="field">
+        <label><span id="mlNameLabel">Nama</span> <span class="req">*</span></label>
+        <input type="text" id="mlName" placeholder="Contoh: High">
+        <span class="field-error" id="mlNameError"></span>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label>Urutan Tampilan <span class="req">*</span></label>
+        <input type="number" id="mlOrder" min="1" step="1" placeholder="Angka kecil akan tampil lebih dulu">
+      </div>
+      <div class="field" id="mlSlaField">
+        <label>SLA <span class="req">*</span></label>
+        <div class="gap-8">
+          <input type="number" id="mlSlaDays" min="0" step="1" placeholder="0" style="flex:1;" aria-label="SLA hari"><span class="text-dim">hari</span>
+          <input type="number" id="mlSlaHours" min="0" max="23" step="1" placeholder="0" style="flex:1;" aria-label="SLA jam"><span class="text-dim">jam</span>
+        </div>
+        <span class="field-error" id="mlSlaError"></span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" data-close="mlModalOverlay">Batal</button>
+      <button type="button" class="btn primary" id="mlSaveBtn">Simpan</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ MODAL: Bug Report Form ============ -->
-<div class="modal-overlay" id="bugModalOverlay">
+<div class="modal-overlay" id="bugModalOverlay" data-backdrop-guard>
   <div class="modal lg">
     <div class="modal-header">
       <h2 id="bugModalTitle">Buat Bug Report</h2>
@@ -890,11 +955,11 @@
       <!-- <div class="section-label">Klasifikasi</div> -->
       <div class="form-row">
         <div class="field" data-field="severity"><label>Severity <span class="req">*</span></label>
-          <select name="severity"><option>Critical</option><option>High</option><option>Medium</option><option>Low</option></select>
+          <select name="severity"></select>
         </div>
         <div class="field"><label>Priority</label><select name="priority"></select></div>
       </div>
-      <div class="field" data-field="dueDate"><label>Due Date</label><input type="date" name="dueDate"></div>
+      <div class="field" data-field="dueDate"><label>Due Date</label><input type="datetime-local" name="dueDate"></div>
 
       <div class="form-row">
         <div class="field" data-field="environment"><label>Environment</label><select name="environment"></select></div>
@@ -1019,29 +1084,31 @@
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
 
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=43"></script>
-<script src="js/app.js?v=41"></script>
+<script src="js/utils.js?v=51"></script>
+<script src="js/app.js?v=45"></script>
 <script src="js/activitylog.js?v=7"></script>
 <script src="js/workspace.js?v=5"></script>
-<script src="js/auth.js?v=25"></script>
-<script src="js/dashboard.js?v=18"></script>
-<script src="js/testcase.js?v=50"></script>
-<script src="js/testforge.js?v=3"></script>
-<script src="js/bugreport.js?v=64"></script>
-<script src="js/summary.js?v=19"></script>
-<script src="js/report.js?v=13"></script>
-<script src="js/notifications.js?v=3"></script>
+<script src="js/auth.js?v=29"></script>
+<script src="js/dashboard.js?v=19"></script>
+<script src="js/testcase.js?v=55"></script>
+<script src="js/testforge.js?v=4"></script>
+<script src="js/bugreport.js?v=73"></script>
+<script src="js/summary.js?v=21"></script>
+<script src="js/report.js?v=26"></script>
+<script src="js/notifications.js?v=5"></script>
 <script src="js/import.js?v=17"></script>
 <script src="js/export.js?v=16"></script>
 <script src="js/settings.js?v=16"></script>
 <script src="js/masterstatus.js?v=16"></script>
-<script src="js/usermanagement.js?v=20"></script>
+<script src="js/masterlevel.js?v=4"></script>
+<script src="js/usermanagement.js?v=21"></script>
 <script>
   // Generic modal close (X button / Cancel buttons) + quick-add wiring.
   document.querySelectorAll('[data-close]').forEach(btn => {
     btn.addEventListener('click', () => document.getElementById(btn.dataset.close).classList.remove('active'));
   });
-  document.querySelectorAll('.modal-overlay').forEach(ov => {
+  // data-backdrop-guard: the module handles outside clicks itself (e.g. unsaved-changes prompt).
+  document.querySelectorAll('.modal-overlay:not([data-backdrop-guard])').forEach(ov => {
     ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('active'); });
   });
   document.getElementById('tcAddBtn').addEventListener('click', () => TestCaseModule.openForm());

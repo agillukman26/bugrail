@@ -5,7 +5,8 @@
    ========================================================== */
 
 const BugReportModule = {
-  SEVERITY: ['Critical', 'High', 'Medium', 'Low'],
+  // Settings > Master > Severity & Priority (js/masterlevel.js)
+  get SEVERITY(){ return BUG_LEVELS.names('severity'); },
   /* Seed for Settings > Master > Status Bug Report (js/masterstatus.js) */
   DEFAULT_STATUS_MASTER: [
     { code: 'OPEN', name: 'Open', color: '#2563EB', order: 1 },
@@ -204,7 +205,7 @@ const BugReportModule = {
         <td class="truncate" title="${escapeHtml(b.module)}">${escapeHtml(b.module)}</td>
         <td>${this.severityBadge(b.severity)}</td>
         <td>${this.statusBadge(b.status)}</td>
-        <td>${escapeHtml(b.tester || '-')}</td>
+        <td title="${escapeHtml(b.tester || '')}">${escapeHtml(userName(b.tester) || '-')}</td>
         <td>${formatDate(b.reportDate)}</td>
         <td>${this.dueDateHtml(b)}</td>
         <td class="cell-actions">
@@ -224,19 +225,19 @@ const BugReportModule = {
     document.getElementById('bugSelectAll').checked = pageRows.length > 0 && pageRows.every(r => this.ui.selected.has(r.id));
   },
 
-  // Priority SLA due date for the open form, as YYYY-MM-DD (local) for <input type=date>.
+  // Priority SLA due date for the open form, as YYYY-MM-DDTHH:mm (local) for <input type=datetime-local>.
   autoDueDay(priority){
     const iso = BUG_FORM.dueDate({ reportDate: this.ui.formReportDate, priority });
     if (!iso) return '';
     const d = new Date(iso), p = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   },
   dueDateHtml(b){
     const due = BUG_FORM.dueDate(b);
     if (!due) return '-';
     return BUG_FORM.isOverdue(b)
-      ? `<span style="color:var(--sev-critical); font-weight:600;" title="Lewat SLA">${formatDate(due)} ⚠</span>`
-      : formatDate(due);
+      ? `<span style="color:var(--sev-critical); font-weight:600;" title="Lewat SLA">${formatDateTime(due)} ⚠</span>`
+      : formatDateTime(due);
   },
 
   renderFileList(){
@@ -300,7 +301,8 @@ const BugReportModule = {
                   ${this.severityBadge(b.severity)}
                 </div>
                 <div class="board-card-title">${escapeHtml(b.title)}</div>
-                <div class="board-card-meta"><span>${escapeHtml(b.tester || '-')}</span><span>${formatDate(b.reportDate)}</span></div>
+                <div class="board-card-meta"><span>${escapeHtml(userName(b.tester) || '-')}</span><span>${formatDate(b.reportDate)}</span></div>
+                ${BUG_FORM.dueDate(b) ? `<div class="board-card-meta"><span>Due Date</span><span>${this.dueDateHtml(b)}</span></div>` : ''}
               </div>
             `).join('')}
           </div>
@@ -340,7 +342,31 @@ const BugReportModule = {
     bug.status = status;
     App.saveBugs();
     ActivityLog.record('bugreport_update', `Bug ${bugCode(bug)} status diubah dari ${from} ke ${status} (board)${change.note ? `: ${change.note}` : ''}`);
+    this.passLinkedTestCases([bug]);
     this.render();
+  },
+
+  /* Bug moved to Resolved -> its linked test case becomes Passed, once no other
+     bug on that test case is still open (Resolved / Closed / Rejected count as done). */
+  passLinkedTestCases(bugs){
+    const done = new Set(['RESOLVED', 'CLOSED', 'REJECTED']);
+    const passed = [];
+    bugs.forEach(b => {
+      if (!b.testCaseId || this.statusCode(b.status) !== 'RESOLVED') return;
+      const tc = App.state.testcases.find(t => t.id === b.testCaseId);
+      if (!tc || tc.status === 'Passed' || passed.includes(tc)) return;
+      if (!App.state.bugs.every(o => o.testCaseId !== tc.id || done.has(this.statusCode(o.status)))) return;
+      const from = tc.status;
+      tc.status = 'Passed';
+      tc.executionDate = todayISO();
+      tc.lastRunAt = nowISO();
+      passed.push(tc);
+      ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} Resolved)`);
+    });
+    if (passed.length){
+      App.saveTestcases();
+      Toast.show(`${passed.map(tcCode).join(', ')} otomatis menjadi Passed.`, 'info');
+    }
   },
 
   logActivity(bug, from, to, change = {}){
@@ -467,9 +493,10 @@ const BugReportModule = {
           <div class="bug-side-heading">Details</div>
           ${sideField('Status', this.statusBadge(bug.status))}
           ${sideField('Severity', this.severityBadge(bug.severity))}
-          ${sideField('Priority', escapeHtml(bug.priority))}
+          ${sideField('Priority', this.priorityBadge(bug.priority))}
+          ${sideField('Due Date', this.dueDateHtml(bug))}
           ${sideField('Module', escapeHtml(bug.module || '-'))}
-          ${sideField('Tester', escapeHtml(bug.tester || '-'))}
+          ${sideField('Tester', escapeHtml(userName(bug.tester) || '-'))}
           ${sideField('Assignee', escapeHtml(bug.assignee || '-'))}
           ${sideField('Environment', escapeHtml([bug.environment, bug.buildVersion].filter(Boolean).join(' · ') || '-'))}
           ${sideField('Platform', escapeHtml([bug.platform, bug.os, bug.browser, bug.device].filter(Boolean).join(' · ') || '-'))}
@@ -577,7 +604,8 @@ const BugReportModule = {
     this.renderChat(bug);
   },
 
-  severityBadge(sev){ return `<span class="badge sev-${sev.toLowerCase()}"><span class="dot"></span>${sev}</span>`; },
+  severityBadge(sev){ return BUG_LEVELS.badge('severity', sev); },
+  priorityBadge(prio){ return BUG_LEVELS.badge('priority', prio); },
   /* Status options always come from Settings > Master > Status Bug Report.
      A bug still holding a status that's no longer in the master (legacy data)
      keeps it as an extra option, so opening/saving it doesn't silently change it. */
@@ -595,14 +623,25 @@ const BugReportModule = {
   },
 
   renderFilterOptions(){
-    const build = (id, field) => {
+    const build = (id, field, label = v => v) => {
       const el = document.getElementById(id);
       const current = this.ui.filters[field];
       el.innerHTML = `<option value="">${el.dataset.label}</option>` +
-        this.uniqueValues(field).map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
+        this.uniqueValues(field).map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(label(v))}</option>`).join('');
     };
     build('bugFilterModule', 'module');
-    build('bugFilterTester', 'tester');
+    build('bugFilterTester', 'tester', userName);
+    // Master order first; legacy values still on bugs stay filterable.
+    const levels = (id, kind) => {
+      const el = document.getElementById(id);
+      const current = this.ui.filters[kind];
+      const list = BUG_LEVELS.names(kind);
+      this.uniqueValues(kind).map(v => kind === 'priority' ? normPriority(v) : v).forEach(v => { if (!list.includes(v)) list.push(v); });
+      el.innerHTML = `<option value="">${el.dataset.label}</option>` +
+        list.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(v)}</option>`).join('');
+    };
+    levels('bugFilterSeverity', 'severity');
+    levels('bugFilterPriority', 'priority');
     const statusEl = document.getElementById('bugFilterStatus');
     statusEl.innerHTML = `<option value="">${statusEl.dataset.label}</option>` +
       this.statusOptions(this.ui.filters.status, this.uniqueValues('status'));
@@ -700,9 +739,12 @@ const BugReportModule = {
     document.getElementById('bugFieldId').value = bug ? bugCode(bug) : '(auto generate, nomor per workspace)';
     document.getElementById('bugFieldDate').value = formatDateTime(bug ? bug.reportDate : nowISO());
 
-    this.fillSelect(f.priority, BUG_FORM.PRIORITIES, bug ? bug.priority : '', '— Pilih Priority —');
+    this.fillSelect(f.severity, this.SEVERITY, bug ? bug.severity : '', '— Pilih Severity —');
+    this.fillSelect(f.priority, BUG_LEVELS.names('priority'), bug ? bug.priority : '', '— Pilih Priority —');
     this.ui.formReportDate = bug ? bug.reportDate : nowISO();
-    f.dueDate.value = (bug && bug.dueDate) || this.autoDueDay(f.priority.value);
+    // Legacy date-only due date = end of that day.
+    const ownDue = bug && bug.dueDate ? (/^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate) ? `${bug.dueDate}T23:59` : bug.dueDate) : '';
+    f.dueDate.value = ownDue || this.autoDueDay(f.priority.value);
     this.fillSelect(f.environment, BUG_FORM.ENVIRONMENTS, bug ? bug.environment : '', '— Pilih Environment —');
     // Bugs saved before Platform existed: infer it from Browser / Device (not written back until saved).
     const platform = bug ? (bug.platform || (bug.device && !bug.browser ? 'Mobile App' : bug.browser ? 'Web' : '')) : '';
@@ -713,16 +755,15 @@ const BugReportModule = {
       f.stepsRef.value = stepsHtmlToText(bug.steps || ''); f.expectedResultRef.value = bug.expectedResult || '';
       f.title.value = bug.title || ''; f.description.value = bug.description || '';
       f.actualResult.value = bug.actualResult || '';
-      f.severity.value = bug.severity;
       f.status.innerHTML = this.statusOptions(bug.status);
       f.browser.value = bug.browser || ''; f.os.value = bug.os || ''; f.device.value = bug.device || '';
       f.buildVersion.value = bug.buildVersion || '';
-      f.attachments.value = bug.attachments || ''; f.tester.value = bug.tester || '';
+      f.attachments.value = bug.attachments || ''; this.setTester(bug.tester);
       this.applyTestCase(bug.testCaseId || null, { restore: { useTcSteps: !!bug.useTcSteps, useTcExpected: !!bug.useTcExpected } });
     } else {
-      f.severity.value = 'Medium';
+      f.severity.value = ''; // tester must choose; the form validation asks for it
       f.status.innerHTML = this.statusOptions(); // first status in master order
-      f.tester.value = Auth.currentEmail() || '';
+      this.setTester(Auth.currentEmail());
       this.applyTestCase(prefillTestCaseId || null);
       // Actual result the tester wrote when running the test case — still editable.
       const tc = App.state.testcases.find(t => t.id === prefillTestCaseId);
@@ -758,13 +799,14 @@ const BugReportModule = {
     try{
       const res = await fetch(`${API_BASE}/bug/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           apiKey: App.state.settings.geminiApiKey || undefined,
           testcase: { module: tc.module, scenario: tc.scenario, testCase: tc.testCase, preconditions: tc.preconditions,
             steps: stepsHtmlToText(tc.steps || ''), testData: tc.testData, expectedResult: tc.expectedResult, actualResult: tc.actualResult }
         })
       });
+      if (res.status === 401){ Auth.sessionExpired(); return; }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Analisa gagal');
       // The tester may have closed the form or opened another one while waiting.
@@ -783,6 +825,12 @@ const BugReportModule = {
     }
   },
   closeForm(){ document.getElementById('bugModalOverlay').classList.remove('active'); },
+  // Read-only field shows the login name; the email (what's saved) rides in data-email.
+  setTester(email){
+    const el = document.getElementById('bugForm').tester;
+    el.dataset.email = email || ''; el.value = userName(email); el.title = email || '';
+  },
+
   formSnapshot(){
     return JSON.stringify([...document.getElementById('bugForm').elements].filter(el => el.name).map(el => el.type === 'checkbox' ? el.checked : el.value));
   },
@@ -790,6 +838,13 @@ const BugReportModule = {
   async requestCloseForm(){
     if (this.formSnapshot() !== this.ui.formSnapshot && !(await confirmDialog('Buang perubahan?', 'Isian form bug report yang belum disimpan akan hilang.', 'Buang'))) return;
     this.closeForm();
+  },
+  // Click outside the modal: same Simpan / Buang / Lanjut Edit prompt as the Test Case form.
+  async onBackdropClick(){
+    if (this.formSnapshot() === this.ui.formSnapshot){ this.closeForm(); return; }
+    const choice = await unsavedChangesDialog();
+    if (choice === 'discard') this.closeForm();
+    else if (choice === 'save') document.getElementById('bugForm').requestSubmit();
   },
 
   /* Limited editors (bugreport_updateStatusPriority without full bugreport_update)
@@ -956,7 +1011,7 @@ const BugReportModule = {
       // Snapshot text, not a reference: editing the test case later doesn't change the bug.
       steps: textToStepsHtml(f.stepsRef.value), expectedResult: f.expectedResultRef.value.trim(),
       useTcSteps: linked && f.useTcSteps.checked, useTcExpected: linked && f.useTcExpected.checked,
-      tester: f.tester.value.trim(),
+      tester: f.tester.dataset.email || '',
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
       // Same as the Priority SLA date -> store '' so it keeps following Priority.
@@ -989,6 +1044,7 @@ const BugReportModule = {
         await App.saveBugs();
         ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}${change.note ? `: ${change.note}` : ''})` : ''}`);
         Toast.show(`Bug ${bugCode(prev)} diperbarui.`, 'success');
+        if (change) this.passLinkedTestCases([App.state.bugs[idx]]);
       } else {
         const bug = { id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, reportDate: nowISO() };
         Auth.logAssignment(bug, '', data.assignee);
@@ -1041,15 +1097,18 @@ const BugReportModule = {
     if (!this.ui.selected.size || !status) return;
     const change = await this.confirmStatusChange(this.all().filter(b => this.ui.selected.has(b.id)), status, `${this.ui.selected.size} bug → ${status}`);
     if (!change) return;
-    let changed = 0;
+    const moved = [];
     App.state.bugs.forEach(b => {
       if (this.ui.selected.has(b.id) && b.status !== status){
         this.logActivity(b, b.status, status, change);
         b.status = status;
-        changed++;
+        moved.push(b);
       }
     });
-    App.saveBugs(); this.render();
+    const changed = moved.length;
+    App.saveBugs();
+    this.passLinkedTestCases(moved);
+    this.render();
     if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)${change.note ? `: ${change.note}` : ''}`);
     Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
   },
@@ -1208,7 +1267,7 @@ const BugReportModule = {
   async downloadImportTemplate(){
     const formOptions = name => [...document.querySelectorAll(`#bugForm [name="${name}"] option`)].map(o => o.value).filter(Boolean);
     const lists = {
-      severity: formOptions('severity'), priority: formOptions('priority'), environment: formOptions('environment'),
+      severity: BUG_LEVELS.names('severity'), priority: BUG_LEVELS.names('priority'), environment: formOptions('environment'),
       status: this.STATUS,
       assignee: (App.state.settings.users || [])
         .filter(u => !Auth.currentWorkspaceId() || WorkspaceCalc.userWorkspaceIds(u).includes(Auth.currentWorkspaceId()))
@@ -1310,6 +1369,7 @@ const BugReportModule = {
     const f = document.getElementById('bugForm');
     f.addEventListener('submit', e => this.submitForm(e));
     document.getElementById('bugFormCancelBtn').addEventListener('click', () => this.requestCloseForm());
+    bindBackdropClose(document.getElementById('bugModalOverlay'), () => this.onBackdropClick());
     document.getElementById('bugFormCloseX').addEventListener('click', () => this.requestCloseForm());
     f.addEventListener('input', e => {
       const field = e.target.closest('[data-field]');
@@ -1338,6 +1398,7 @@ const BugReportModule = {
       rows.forEach(r => e.target.checked ? this.ui.selected.add(r.id) : this.ui.selected.delete(r.id));
       this.render();
     });
+    searchableSelect(document.getElementById('bugFilterModule'), 'Cari module...');
     ['bugFilterModule','bugFilterSeverity','bugFilterPriority','bugFilterStatus','bugFilterTester'].forEach(id => {
       document.getElementById(id).addEventListener('change', e => {
         const map = { bugFilterModule:'module', bugFilterSeverity:'severity', bugFilterPriority:'priority', bugFilterStatus:'status', bugFilterTester:'tester' };

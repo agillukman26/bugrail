@@ -53,4 +53,17 @@ assert.strictEqual(JSON.stringify(devTc.reminders), JSON.stringify([{ fileId: 'F
 assert.strictEqual(N.build({ testcases, me: 'qa@x.com' }).reminders.length, 1);
 assert.strictEqual(N.build({ testcases, me: 'dev@x.com', canTc: false }).reminders.length, 0);
 
+// Past SLA: creator and assignee both get it, dated at the due time; others don't
+{
+  const overdueAt = b => (b.id === 'BUG-1' ? '2026-01-04T23:59:59.000Z' : '');
+  const late = r => r.events.filter(e => e.icon === '⏰');
+  assert.strictEqual(late(N.build({ bugs, me: 'qa@x.com', overdueAt })).length, 1, 'creator');
+  const dev = late(N.build({ bugs, me: 'dev@x.com', overdueAt }));
+  assert.strictEqual(dev.length, 1, 'assignee');
+  assert.strictEqual(dev[0].at, '2026-01-04T23:59:59.000Z');
+  assert.ok(dev[0].text.includes('lewat SLA'));
+  assert.strictEqual(late(N.build({ bugs, me: 'other@x.com', overdueAt })).length, 0, 'BUG-2 not overdue');
+  assert.strictEqual(late(N.build({ bugs, me: 'x@x.com', overdueAt })).length, 0, 'not involved');
+}
+
 console.log('notifications.check.js: all checks passed');

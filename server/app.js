@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const db = require('./db');
+const { hashPassword, isHashed, verifyPassword, normalizeEmail, userWorkspaceIds, can, findUser, sanitizeSettings, applySettingsWrite } = require('./auth');
 
 const ALLOWED_KEYS = new Set(['qa_testcases', 'qa_bugs', 'qa_files', 'qa_settings', 'qa_counters', 'qa_activity_log']);
 
@@ -10,14 +12,179 @@ app.use(express.json({ limit: '20mb' }));
 // Serve the frontend too, so local dev is just `npm start` + http://localhost:3001
 app.use(express.static(require('path').join(__dirname, '..', 'qa-app')));
 
+// Fixed-window limiter shared by login and the AI routes. map: key -> [timestamps].
+// ponytail: in-memory only (resets on restart, not shared across instances, keys never pruned)
+// — fine for a single-process internal tool.
+function hitLimit(map, key, limit, windowMs){
+  const now = Date.now();
+  const hits = (map.get(key) || []).filter(t => now - t < windowMs);
+  hits.push(now);
+  map.set(key, hits);
+  return hits.length > limit;
+}
+
+const LOGIN_RATE_LIMIT = 10;
+const LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
+const loginHits = new Map(); // ip|email -> [timestamps]
+const SESSION_TTL_S = 30 * 24 * 60 * 60;
+// Read per request (tests toggle it). Off => passwords stay in their stored format: old builds can't read hashes.
+const hashUpgrade = () => process.env.PASSWORD_HASH_UPGRADE === '1';
+
+let sessionIndex = null; // TTL index, created once on first login; failure must not block login
+function ensureSessionIndex(conn){
+  // On failure forget the promise so the next login retries.
+  if (!sessionIndex) sessionIndex = Promise.resolve(conn.collection('sessions').createIndex({ createdAt: 1 }, { expireAfterSeconds: SESSION_TTL_S })).catch(() => { sessionIndex = null; });
+  return sessionIndex;
+}
+
+// Tell open browsers qa_settings changed (rev read back, since updateOne doesn't return it).
+async function broadcastSettings(conn){
+  const row = await conn.collection('kv_store').findOne({ _id: 'qa_settings' });
+  broadcast({ key: 'qa_settings', rev: (row && row.rev) || 0 });
+}
+
+// First login on an empty DB: create the default admin. The filter only matches when users is
+// missing/empty, so it can never overwrite real accounts; if users exist the upsert hits a
+// duplicate _id (11000) => someone else already seeded.
+async function seedAdmin(conn){
+  const user = { email: 'admin@bugrail.local', password: hashUpgrade() ? await hashPassword('sama') : 'sama', role: 'admin' };
+  try {
+    await conn.collection('kv_store').updateOne(
+      { _id: 'qa_settings', $or: [{ 'value.users': { $exists: false } }, { 'value.users': { $size: 0 } }] },
+      { $set: { 'value.users': [user] }, $inc: { rev: 1 } },
+      { upsert: true }
+    );
+  } catch (err) {
+    if (err && err.code === 11000) return null;
+    throw err;
+  }
+  await broadcastSettings(conn);
+  return user;
+}
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body && req.body.email);
+    const password = req.body && req.body.password;
+    if (hitLimit(loginHits, `${req.ip}|${email}`, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)) {
+      return res.status(429).json({ error: 'Terlalu banyak percobaan login, coba lagi nanti.' });
+    }
+    const conn = await db.getDb();
+    const kv = conn.collection('kv_store');
+    const load = async () => { const row = await kv.findOne({ _id: 'qa_settings' }); return (row && row.value) || {}; };
+    const settings = await load();
+    let user = findUser(settings, email);
+    if (!(settings.users || []).length) {
+      const seeded = await seedAdmin(conn);
+      user = findUser(seeded ? { users: [seeded] } : await load(), email);
+    }
+    if (!user || typeof password !== 'string' || !(await verifyPassword(user.password, password))) {
+      return res.status(401).json({ error: 'Email atau password salah.' });
+    }
+    // Lazy upgrade: filter on the old plaintext so a concurrent password change is never overwritten.
+    // Best effort: the password was already verified, so a failed upgrade must not fail the login (next login retries).
+    if (hashUpgrade() && !isHashed(user.password)) {
+      try {
+        const r = await kv.updateOne(
+          { _id: 'qa_settings', 'value.users': { $elemMatch: { email: user.email, password: user.password } } },
+          { $set: { 'value.users.$.password': await hashPassword(password) }, $inc: { rev: 1 } }
+        );
+        if (r.modifiedCount) await broadcastSettings(conn);
+      } catch (err) {
+        console.error('POST /api/login: password hash upgrade failed', err);
+      }
+    }
+    const token = crypto.randomBytes(32).toString('hex');
+    await ensureSessionIndex(conn);
+    await conn.collection('sessions').insertOne({ _id: token, email: user.email, createdAt: new Date() });
+    res.json({ token, email: user.email, role: user.role, workspaceIds: userWorkspaceIds(user) });
+  } catch (err) {
+    console.error('POST /api/login failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+});
+
+// Everything below /api needs a valid session. Identity (role, workspaces) comes from the
+// stored user, never from client headers. Static frontend files are served before this.
+async function requireAuth(req, res, next){
+  const m = /^Bearer (.+)$/.exec(req.get('authorization') || '');
+  // ?token= only for the SSE stream (EventSource can't set headers); URLs end up in logs.
+  const token = m ? m[1] : (req.path === '/events' && typeof req.query.token === 'string' ? req.query.token : '');
+  if (!token) return res.status(503).json({ error: 'Aplikasi diperbarui — muat ulang halaman (Ctrl+F5).' });
+  try {
+    const conn = await db.getDb();
+    const session = await conn.collection('sessions').findOne({ _id: token });
+    const row = session && await conn.collection('kv_store').findOne({ _id: 'qa_settings' });
+    const settings = (row && row.value) || {};
+    const user = session && findUser(settings, session.email);
+    if (!user) return res.status(401).json({ error: 'Sesi tidak valid, silakan login ulang.' });
+    const workspaceIds = userWorkspaceIds(user);
+    const workspace = req.get('x-workspace') || '';
+    if (workspace && user.role !== 'admin' && !workspaceIds.includes(workspace)) {
+      return res.status(403).json({ error: 'Bukan anggota workspace ini.' });
+    }
+    req.token = token;
+    req.user = { email: user.email, role: user.role, workspaceIds };
+    req.settings = settings;
+    req.workspace = workspace;
+    req.canShare = can(settings, user.role, 'testcase_fileShare');
+    next();
+  } catch (err) {
+    console.error('requireAuth failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+}
+app.use('/api', requireAuth);
+
+app.post('/api/logout', async (req, res) => {
+  try {
+    const conn = await db.getDb();
+    await conn.collection('sessions').deleteOne({ _id: req.token });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/logout failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+});
+
+// Bell "read up to" time per user (own collection, nothing else touched), so reading on
+// one laptop clears the badge on the others. Server clock, and $max: never goes backwards.
+app.get('/api/notif-seen', async (req, res) => {
+  try {
+    const conn = await db.getDb();
+    const row = await conn.collection('notif_seen').findOne({ _id: normalizeEmail(req.user.email) });
+    res.json({ at: (row && row.at) || '' });
+  } catch (err) {
+    console.error('GET /api/notif-seen failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+});
+app.put('/api/notif-seen', async (req, res) => {
+  try {
+    const conn = await db.getDb();
+    const at = new Date().toISOString();
+    await conn.collection('notif_seen').updateOne({ _id: normalizeEmail(req.user.email) }, { $max: { at } }, { upsert: true });
+    broadcast({ key: 'notif_seen' }); // no email in the message: each browser re-reads its own
+    res.json({ at });
+  } catch (err) {
+    console.error('PUT /api/notif-seen failed', err);
+    res.status(500).json({ error: 'Database unreachable' });
+  }
+});
+
+// Passwords never leave the server.
+const publicValue = (key, value) => (key === 'qa_settings' && value && typeof value === 'object' ? sanitizeSettings(value) : value);
+
 // All KV pairs at once — used for the one-time hydrate on app boot.
 app.get('/api/kv', async (req, res) => {
   try {
     const conn = await db.getDb();
     const rows = await conn.collection('kv_store').find().toArray();
     // _revs: each key's version, sent back on PUT so a stale write is refused (see PUT below).
-    const out = { _revs: {} };
-    rows.forEach(r => { out[r._id] = r.value; out._revs[r._id] = r.rev || 0; });
+    // _auth: tells the client this server polices passwords; without it the client stops writing
+    // (an older server would store its password-less users and wipe every password).
+    const out = { _revs: {}, _auth: 1 };
+    rows.forEach(r => { out[r._id] = publicValue(r._id, r.value); out._revs[r._id] = r.rev || 0; });
     res.json(out);
   } catch (err) {
     console.error('GET /api/kv failed', err);
@@ -29,25 +196,12 @@ app.get('/api/kv/:key', async (req, res) => {
   try {
     const conn = await db.getDb();
     const row = await conn.collection('kv_store').findOne({ _id: req.params.key });
-    res.json({ value: row ? row.value : null, rev: (row && row.rev) || 0 });
+    res.json({ value: row ? publicValue(req.params.key, row.value) : null, rev: (row && row.rev) || 0, _auth: 1 }); // _auth: see GET /api/kv
   } catch (err) {
     console.error('GET /api/kv/:key failed', err);
     res.status(500).json({ error: 'Database unreachable' });
   }
 });
-
-// Client identifies itself via these headers (see Storage.set in qa-app/js/utils.js).
-// Not real authentication (no signature/session check) — but stops a non-admin
-// client from writing files it doesn't own into another workspace, or granting
-// cross-workspace sharing without the share permission, even if the frontend
-// UI gating is bypassed.
-function readClientAuth(req){
-  return {
-    role: req.get('x-role') || '',
-    workspace: req.get('x-workspace') || '',
-    canShare: req.get('x-can-share') === '1'
-  };
-}
 
 // The client always PUTs the WHOLE qa_files array (every workspace's files,
 // since Auth.visibleFiles() lets a non-admin see files shared into their
@@ -62,7 +216,8 @@ function sameSharedWith(a, b){
 }
 
 async function validateFilesWrite(req, res, next){
-  const { role, workspace, canShare } = readClientAuth(req);
+  const { role } = req.user;
+  const { workspace, canShare } = req;
   if (role === 'admin') return next();
   const files = Array.isArray(req.body.value) ? req.body.value : [];
   try {
@@ -123,6 +278,14 @@ async function validateSettingsWrite(req, res, next){
     if (missing.length){
       return res.status(409).json({ error: `Settings ditolak: akan menghapus ${missing.join(', ')} di server. Muat ulang halaman.` });
     }
+    // Passwords/roles/permissions are policed here, not trusted from the client (see auth.js).
+    const result = await applySettingsWrite(stored, value, req.user, { hashUpgrade: hashUpgrade() });
+    if (result.status) return res.status(result.status).json({ error: result.error });
+    req.body.value = result.value;
+    // Whose password this write changes: their other sessions end once it is saved (see PUT).
+    req.pwChanged = value.users && Array.isArray(value.users)
+      ? value.users.filter(u => u && u.newPassword !== undefined).map(u => (findUser(stored, u.email) || u).email)
+      : [];
     next();
   } catch (err) {
     console.error('validateSettingsWrite failed', err);
@@ -136,7 +299,8 @@ async function validateSettingsWrite(req, res, next){
 // The full form rules (qa-app/js/utils.js BUG_FORM) stay client-side: Excel
 // import and bugs saved before those fields existed don't carry them.
 async function validateBugsWrite(req, res, next){
-  const { role, workspace } = readClientAuth(req);
+  const { role } = req.user;
+  const { workspace } = req;
   const bugs = Array.isArray(req.body.value) ? req.body.value : null;
   if (!bugs) return res.status(400).json({ error: 'qa_bugs harus berupa array' });
   try {
@@ -183,6 +347,16 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => { clearInterval(ping); listeners.delete(res); });
 });
 
+// Password changed: log that user out everywhere except the session that made the change.
+// Already saved, so a failure is only logged.
+async function endSessions(conn, emails, keepToken){
+  try {
+    await conn.collection('sessions').deleteMany({ email: { $in: emails }, _id: { $ne: keepToken } });
+  } catch (err) {
+    console.error('ending sessions after password change failed', err);
+  }
+}
+
 app.put('/api/kv/:key', async (req, res, next) => {
   if (req.params.key === 'qa_files') return validateFilesWrite(req, res, next);
   if (req.params.key === 'qa_bugs') return validateBugsWrite(req, res, next);
@@ -207,6 +381,7 @@ app.put('/api/kv/:key', async (req, res, next) => {
     );
     res.json({ ok: true, rev: doc.rev });
     broadcast({ key, rev: doc.rev });
+    if (req.pwChanged && req.pwChanged.length) await endSessions(conn, req.pwChanged, req.token);
   } catch (err) {
     // Upsert collided with the existing doc => its rev moved on: someone saved first.
     if (err && err.code === 11000) return res.status(409).json({ error: 'Data sudah diubah di tab/user lain.', stale: true });
@@ -217,18 +392,10 @@ app.put('/api/kv/:key', async (req, res, next) => {
 
 const VALID_FIELDS = ['module', 'roleUser', 'scenario', 'testCase', 'preconditions', 'steps', 'testData', 'expectedResult', 'typeTest'];
 
-// ponytail: fixed-window per-IP limiter, in-memory only (resets on restart,
-// not shared across instances) — fine for a single-process internal tool.
 const TESTFORGE_RATE_LIMIT = 10;
 const TESTFORGE_RATE_WINDOW_MS = 5 * 60 * 1000;
 const testForgeHits = new Map(); // ip -> [timestamps]
-function isTestForgeRateLimited(ip){
-  const now = Date.now();
-  const hits = (testForgeHits.get(ip) || []).filter(t => now - t < TESTFORGE_RATE_WINDOW_MS);
-  hits.push(now);
-  testForgeHits.set(ip, hits);
-  return hits.length > TESTFORGE_RATE_LIMIT;
-}
+const isTestForgeRateLimited = ip => hitLimit(testForgeHits, ip, TESTFORGE_RATE_LIMIT, TESTFORGE_RATE_WINDOW_MS);
 
 // Returns the model's text, or null when the provider call fails (logged).
 async function askGemini(apiKey, parts){

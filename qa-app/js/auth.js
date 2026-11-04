@@ -1,8 +1,7 @@
 /* ==========================================================
    auth.js — per-account email+password login gate.
-   Client-side only: no real security, just an access gate to
-   stop accidental destructive actions (e.g. delete file/folder).
-   Accounts persist in localStorage (settings.users). Session
+   Credentials are checked by the server (POST /api/login);
+   the session token lives in sessionStorage (qa_sid). Session
    role/email live in sessionStorage (per tab). The latest login is also kept in
    localStorage with a session id: a new tab starts from it, and on every load a
    tab stays logged in only while that id is still current (Logout anywhere ends it).
@@ -14,10 +13,6 @@ const Auth = {
   SID_KEY: 'qa_sid',
   EMAIL_KEY: 'qa_email',
   WORKSPACE_KEY: 'qa_workspace',
-  DEFAULT_USERS: [
-    { email: 'admin@bugrail.local', password: 'sama', role: 'admin' }
-  ],
-
   /* Seed roles — after first load these live in settings.roles and are
      fully editable (add/edit/delete) from the Role Permission page.
      'admin' is not stored here: it's a fixed, undeletable role (see isAdmin/can). */
@@ -54,7 +49,7 @@ const Auth = {
     { key: 'bugreport_delete', label: 'Bug Report — Hapus' },
     { key: 'bugreport_board', label: 'Bug Report — Board (drag & drop)' },
     { key: 'bugreport_statusQA', label: 'Bug Report — Status QA (hanya dari Retest ke Open/Blocked/Resolved/Closed, wajib keterangan)' },
-    { key: 'master', label: 'Master — Status Bug Report' },
+    { key: 'master', label: 'Master — Status Bug Report, Severity & Priority' },
     { key: 'usermanagement', label: 'User Management — Daftar User' },
     { key: 'settings', label: 'Settings' }
   ],
@@ -215,24 +210,10 @@ const Auth = {
     return (users || []).find(u => this.normalizeEmail(u.email) === target) || null;
   },
 
-  matchCredentials(users, email, password){
-    const user = this.findByEmail(users, email);
-    if (!user || user.password !== password) return null;
-    return user;
-  },
-
   /* ---- Storage access (reads settings directly — App.state.settings
      isn't loaded yet at pre-login time, App.init() runs after login) ---- */
   loadSettingsRaw(){
     return Storage.get(STORAGE_KEYS.SETTINGS, { theme: 'light', customFieldDefs: [], users: [] });
-  },
-
-  ensureSeedUsers(){
-    const settings = this.loadSettingsRaw();
-    if (!settings.users || !settings.users.length){
-      settings.users = this.DEFAULT_USERS.slice();
-      Storage.set(STORAGE_KEYS.SETTINGS, settings);
-    }
   },
 
   /* ---- Login/session lifecycle ----
@@ -242,6 +223,9 @@ const Auth = {
   startApp(){
     document.body.classList.remove('pre-auth');
     App.init();
+    NotificationCenter.syncSeen();
+    // Only now: the workspace is set, so the re-sent PUTs carry the right x-workspace.
+    Storage.flushPending();
     if (this._freshLogin){
       ActivityLog.record('login', `${this.currentEmail()} login sebagai ${this.role()}`);
       this._freshLogin = false;
@@ -250,24 +234,35 @@ const Auth = {
     return App.openDeepLink(); // #bug=… link: jump straight to that bug
   },
 
-  login(email, password){
-    this.ensureSeedUsers();
-    const settings = this.loadSettingsRaw();
-    const user = this.matchCredentials(settings.users, email, password);
+  async login(email, password){
     const errEl = document.getElementById('loginError');
-    if (!user){
-      errEl.textContent = 'Email atau password salah.';
-      return;
+    const btn = document.querySelector('#loginForm button[type="submit"]');
+    if (btn) btn.disabled = true;
+    try{
+      let res, body = {};
+      try{
+        res = await fetch(`${API_BASE}/login`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        body = await res.json().catch(() => ({}));
+      }catch(e){
+        errEl.textContent = 'Server tidak terhubung.';
+        return;
+      }
+      if (!res.ok){ errEl.textContent = body.error || 'Login gagal.'; return; }
+      errEl.textContent = '';
+      sessionStorage.setItem(this.ROLE_KEY, body.role);
+      sessionStorage.setItem(this.EMAIL_KEY, body.email);
+      sessionStorage.setItem(this.SID_KEY, body.token);
+      try{ localStorage.setItem(this.SESSION_SEED_KEY, JSON.stringify({ role: body.role, email: body.email, sid: body.token })); }catch(e){}
+      sessionStorage.removeItem(this.WORKSPACE_KEY);
+      this._freshLogin = true;
+      await Storage.hydrate();
+      if (WorkspacePicker.resolveOnStart()) this.startApp();
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    errEl.textContent = '';
-    sessionStorage.setItem(this.ROLE_KEY, user.role);
-    sessionStorage.setItem(this.EMAIL_KEY, this.normalizeEmail(email));
-    const sid = IdGen.uid('S');
-    sessionStorage.setItem(this.SID_KEY, sid);
-    try{ localStorage.setItem(this.SESSION_SEED_KEY, JSON.stringify({ role: user.role, email: this.normalizeEmail(email), sid })); }catch(e){}
-    sessionStorage.removeItem(this.WORKSPACE_KEY);
-    this._freshLogin = true;
-    if (WorkspacePicker.resolveOnStart()) this.startApp();
   },
 
   async logout(){
@@ -276,6 +271,7 @@ const Auth = {
     // Let the log (and any other save) reach the server first. Anything still
     // unsynced stays in localStorage and is re-sent on next boot, so no prompt.
     await Storage.settle();
+    try{ await fetch(`${API_BASE}/logout`, { method: 'POST', headers: authHeaders(), signal: AbortSignal.timeout(5000) }); }catch(e){}
     sessionStorage.removeItem(this.ROLE_KEY);
     sessionStorage.removeItem(this.EMAIL_KEY);
     sessionStorage.removeItem(this.SID_KEY);
@@ -285,12 +281,26 @@ const Auth = {
     location.reload();
   },
 
+  // Server said 401 (token expired/revoked): drop this tab's session and reload to the login screen.
+  // Unsynced data stays in localStorage and is re-sent after re-login. Reloads once however many 401s land.
+  sessionExpired(){
+    if (this._expiring) return;
+    this._expiring = true;
+    let seed = null;
+    try{ seed = JSON.parse(localStorage.getItem(this.SESSION_SEED_KEY)); }catch(e){}
+    // Only remove the shared seed if it is this tab's; another tab may hold a live login.
+    if (seed && seed.sid === sessionStorage.getItem(this.SID_KEY)) try{ localStorage.removeItem(this.SESSION_SEED_KEY); }catch(e){}
+    [this.ROLE_KEY, this.EMAIL_KEY, this.SID_KEY, this.WORKSPACE_KEY].forEach(k => sessionStorage.removeItem(k));
+    Storage.leaving = true;
+    location.reload();
+  },
+
   renderBadge(){
     const el = document.getElementById('authBadge');
     if (!el) return;
     const role = this.role();
     const email = this.currentEmail() || '';
-    const name = email.split('@')[0] || (role === 'admin' ? 'Admin' : 'User');
+    const name = userName(email) || (role === 'admin' ? 'Admin' : 'User');
     el.innerHTML = `
       <span class="auth-role" title="${escapeHtml(email)}">${role === 'admin' ? '🔑' : '👤'} ${escapeHtml(name)}</span>
       <button class="btn sm ghost" id="authLogoutBtn">Logout</button>
@@ -314,8 +324,7 @@ const Auth = {
     });
   },
 
-  init(){
-    this.ensureSeedUsers();
+  async init(){
     let seed = null;
     try{ seed = JSON.parse(localStorage.getItem(this.SESSION_SEED_KEY)); }catch(e){}
     // This tab's login was ended (Logout / new login in another tab): drop it.
@@ -329,26 +338,31 @@ const Auth = {
       sessionStorage.setItem(this.SID_KEY, seed.sid);
     }
     this.bindLoginScreen();
-    if (this.role() && WorkspacePicker.resolveOnStart()) this.startApp();
-    // else: stays in pre-auth state, login screen visible, App.init() deferred until login().
+    if (!this.role()) return; // login screen stays; App.init() (and all refresh/SSE) wait for login()
+    const r = await Storage.hydrate();
+    if (r === 'unauthorized'){
+      // Token expired/revoked: drop this tab's session (and the shared seed if it is ours); local data untouched.
+      if (seed && seed.sid === sessionStorage.getItem(this.SID_KEY)) try{ localStorage.removeItem(this.SESSION_SEED_KEY); }catch(e){}
+      [this.ROLE_KEY, this.EMAIL_KEY, this.SID_KEY, this.WORKSPACE_KEY].forEach(k => sessionStorage.removeItem(k));
+      return;
+    }
+    if (WorkspacePicker.resolveOnStart()) this.startApp();
   },
 
   /* ---- Self-check for the pure matching/validation logic.
      Run manually from the browser console: Auth.selfTest() ---- */
   selfTest(){
     const users = [
-      { email: 'Admin@Bugrail.local', password: 'admin123', role: 'admin' },
-      { email: 'tester@bugrail.local', password: 'test1234', role: 'user' }
+      { email: 'Admin@Bugrail.local', role: 'admin' },
+      { email: 'tester@bugrail.local', role: 'user' }
     ];
     let pass = 0, total = 0;
     const check = (label, cond) => {
       total++;
       if (cond) pass++; else console.error('FAIL:', label);
     };
-    check('matches correct credentials', !!this.matchCredentials(users, 'tester@bugrail.local', 'test1234'));
-    check('rejects wrong password', this.matchCredentials(users, 'tester@bugrail.local', 'nope') === null);
-    check('rejects unknown email', this.matchCredentials(users, 'nobody@x.com', 'test1234') === null);
-    check('email match is case-insensitive', !!this.matchCredentials(users, 'ADMIN@bugrail.local', 'admin123'));
+    check('findByEmail is case-insensitive', !!this.findByEmail(users, 'ADMIN@bugrail.local'));
+    check('findByEmail unknown email', this.findByEmail(users, 'nobody@x.com') === null);
     check('findByEmail trims/lowercases', !!this.findByEmail(users, '  Tester@Bugrail.Local  '));
     check('isValidEmail accepts valid address', this.isValidEmail('a@b.com') === true);
     check('isValidEmail rejects missing @', this.isValidEmail('a-b.com') === false);
@@ -359,7 +373,6 @@ const Auth = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await Storage.hydrate();
-  Auth.init();
+  await Auth.init();
   document.getElementById('loadingOverlay').style.display = 'none';
 });

@@ -73,4 +73,7 @@ const manual = F.dueDate({ reportDate: rd, priority: 'Low', dueDate: '2026-01-03
 assert.strictEqual(new Date(manual).getDate(), 3);
 assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'Low', dueDate: '2026-01-03', status: 'Open' }, later), true);
 assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'High', dueDate: '' }), '2026-01-04T00:00:00.000Z');
+// Manual due date with time (datetime-local), local time
+const timed = new Date(F.dueDate({ reportDate: rd, priority: 'Low', dueDate: '2026-01-03T14:30' }));
+assert.strictEqual(timed.getDate(), 3); assert.strictEqual(timed.getHours(), 14); assert.strictEqual(timed.getMinutes(), 30);
 console.log('due date ok');

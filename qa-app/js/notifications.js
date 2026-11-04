@@ -12,7 +12,8 @@ const NotifCalc = {
   FIXED: ['Resolved', 'Closed'],
   REOPENED: ['Reopened', 'Retest'],
 
-  build({ bugs = [], testcases = [], me, canBug = true, canTc = true }){
+  // overdueAt(bug) -> ISO due time when the bug is past its SLA and not finished, else '' (BUG_FORM in the app).
+  build({ bugs = [], testcases = [], me, canBug = true, canTc = true, overdueAt = () => '' }){
     const norm = e => String(e || '').trim().toLowerCase();
     me = norm(me);
     const events = [];
@@ -30,6 +31,8 @@ const NotifCalc = {
       });
       const involved = norm(b.tester) === me || norm(b.assignee) === me;
       if (!involved) return;
+      const due = overdueAt(b); // dated at the due time, so it shows as new once the deadline passes
+      if (due) events.push({ at: due, icon: '⏰', target, text: `${code} sudah lewat SLA dan belum selesai${title}` });
       (b.activity || []).forEach(a => {
         if (norm(a.email) === me) return;
         const icon = this.FIXED.includes(a.to) ? '✅' : this.REOPENED.includes(a.to) ? '🔁' : '🔄';
@@ -58,17 +61,33 @@ const NotifCalc = {
 
 const NotificationCenter = {
   seenKey(){ return `qa_notif_seen_${(Auth.currentEmail() || '').toLowerCase()}`; },
+  /* "Read up to" lives on the server (GET/PUT /api/notif-seen) so every laptop agrees;
+     localStorage only covers the moment before that answer (or a server without the route). */
+  _serverSeen: '',
   lastSeen(){
-    try{ return localStorage.getItem(this.seenKey()) || ''; }catch(e){ return ''; }
+    let local = '';
+    try{ local = localStorage.getItem(this.seenKey()) || ''; }catch(e){}
+    return local > this._serverSeen ? local : this._serverSeen;
   },
   markSeen(){
     try{ localStorage.setItem(this.seenKey(), nowISO()); }catch(e){}
+    this.seenApi('PUT');
+  },
+  syncSeen(){ return this.seenApi('GET'); },
+  async seenApi(method){
+    try{
+      const res = await fetch(`${API_BASE}/notif-seen`, { method, headers: authHeaders(), signal: AbortSignal.timeout(10000) });
+      if (!res.ok) return;
+      const { at } = await res.json();
+      if (at && at > this._serverSeen){ this._serverSeen = at; this.renderBadge(); }
+    }catch(e){} // offline: the local value still works on this laptop
   },
 
   data(){
     return NotifCalc.build({
       bugs: BugReportModule.all(), testcases: TestCaseModule.all(), me: Auth.currentEmail(),
-      canBug: Auth.can('bugreport_read'), canTc: Auth.can('testcase_read')
+      canBug: Auth.can('bugreport_read'), canTc: Auth.can('testcase_read'),
+      overdueAt: b => (BUG_FORM.isOverdue(b) ? BUG_FORM.dueDate(b) : '')
     });
   },
 
