@@ -1169,6 +1169,10 @@ const BugReportModule = {
         let count = 0, sheetsUsed = 0;
         const unknownTc = new Set();
         const skipped = []; // { sheet, row, fields } per row missing a required field
+        // Same bug = same Module + Bug Title in this file (or earlier in the sheet): skipped.
+        const DUP = ['module', 'title'];
+        const seen = new Set(this.all().filter(b => b.fileId === this.ui.activeFileId).map(b => TC_IMPORT.dupKey(b, DUP)));
+        let same = 0;
         wb.SheetNames.forEach(sheetName => {
           const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
           const sheetModule = /^(sheet\s*\d*|template)$/i.test(sheetName.trim()) ? '' : sheetName.trim();
@@ -1215,6 +1219,9 @@ const BugReportModule = {
               buildVersion: r['Build Version'] || r.buildVersion || '', attachments: r.Attachment || r.attachments || '',
               fileId: this.ui.activeFileId, reportDate: nowISO()
             };
+            const key = TC_IMPORT.dupKey(bug, DUP);
+            if (seen.has(key)){ same++; return; }
+            seen.add(key);
             Auth.logAssignment(bug, '', bug.assignee); // assignee gets the bell notification
             App.state.bugs.push(bug);
             count++;
@@ -1223,9 +1230,8 @@ const BugReportModule = {
         });
         App.ensureDefaultFile();
         App.saveBugs();
-        ActivityLog.record('bugreport_create', `${count} bug report di-import dari ${sheetsUsed} sheet`);
+        ActivityLog.record('bugreport_create', `${count} bug report di-import dari ${sheetsUsed} sheet${same ? `, ${same} data sama di-skip` : ''}${skipped.length ? `, ${skipped.length} gagal` : ''}`);
         this.render();
-        const okMsg = `${count} bug report dari ${sheetsUsed} sheet berhasil di-import.`;
         const unknownMsg = `Test Case ID tidak ditemukan (bug tetap di-import tanpa link): ${[...unknownTc].slice(0, 5).join(', ')}${unknownTc.size > 5 ? ` +${unknownTc.size - 5}` : ''}`;
         // One centered popup for every outcome: per-row detail for 1-5 failed rows,
         // else one line per module, or one line if nothing was imported.
@@ -1237,8 +1243,7 @@ const BugReportModule = {
           : !count ? [`Semua module: ${join(skipped.flatMap(s => s.fields))} belum diisi`]
           : Object.entries(bySheet).map(([sheet, f]) => `${sheet}: ${join(f)} belum diisi`);
         if (unknownTc.size) items.push(unknownMsg);
-        const title = skipped.length ? `${skipped.length} baris tidak di-import` : count ? 'Import berhasil' : 'Tidak ada data di-import';
-        listDialog(title, items, okMsg, count > 0 && !items.length);
+        importResultDialog({ same, added: count, failed: skipped.length, errors: items });
       }catch(err){
         console.error(err);
         listDialog('Gagal membaca file', [], 'Pastikan format sesuai template.');

@@ -512,8 +512,19 @@ const TC_IMPORT = {
     const n = String(header).toLowerCase().replace(/[^a-z0-9]/g, '');
     return Object.keys(this.ALIASES).find(k => this.ALIASES[k].includes(n)) || null;
   },
+  // Same test case = same Module + Scenario + Test Case (case / spacing ignored). Bug import passes its own fields.
+  dupKey(tc, fields = ['module', 'scenario', 'testCase']){
+    return fields.map(k => String(tc[k] || '').trim().replace(/\s+/g, ' ').toLowerCase()).join('|');
+  },
+  // Rows already in `existing` (or repeated earlier in the file) are split off as duplicates.
+  splitDuplicates(rows, existing){
+    const seen = new Set(existing.map(t => this.dupKey(t)));
+    const fresh = [], dup = [];
+    rows.forEach(r => { const k = this.dupKey(r); (seen.has(k) ? dup : fresh).push(r); seen.add(k); });
+    return { fresh, dup };
+  },
   /* rawRows: XLSX sheet_to_json(..., { defval: '' }) output. Returns
-     { rows: [test case fields], errors: ['Sheet "x" baris n: ...'], unknown: [header] }. */
+     { rows: [test case fields], errors: ['Sheet "x" baris n: ...'], unknown: [header], failed: rows rejected }. */
   parseSheet(sheetName, rawRows, sheetModule, typeTests, statuses = []){
     const headers = rawRows.length ? Object.keys(rawRows[0]) : [];
     const map = {}, unknown = [], errors = [], rows = [];
@@ -522,15 +533,16 @@ const TC_IMPORT = {
       if (!f){ if (!/^__EMPTY/.test(h)) unknown.push(h); }
       else if (f !== '_skip' && !map[f]) map[f] = h;
     });
-    if (!rawRows.length) return { rows, errors, unknown };
+    if (!rawRows.length) return { rows, errors, unknown, failed: 0 };
+    const filled = rawRows.filter(raw => Object.values(raw).some(v => String(v).trim())).length;
     // Bug Report template (has "Bug Title *") shares Module / Scenario columns — refuse it outright.
     if (headers.some(h => /^bugtitle$/.test(String(h).toLowerCase().replace(/[^a-z0-9]/g, '')))){
       errors.push(`${sheetName}: ini template Bug Report, bukan Test Case`);
-      return { rows, errors, unknown };
+      return { rows, errors, unknown, failed: filled };
     }
     if (!map.scenario){
       errors.push(`${sheetName}: kolom Scenario tidak ada`);
-      return { rows, errors, unknown };
+      return { rows, errors, unknown, failed: filled };
     }
     const byProblem = {}; // problem -> sheet rows, so one line per problem
     rawRows.forEach((raw, i) => {
@@ -557,7 +569,7 @@ const TC_IMPORT = {
     Object.entries(byProblem).forEach(([p, nums]) => {
       errors.push(`${sheetName} baris ${nums.slice(0, 5).join(', ')}${nums.length > 5 ? ` (+${nums.length - 5})` : ''}: ${p}`);
     });
-    return { rows, errors, unknown };
+    return { rows, errors, unknown, failed: filled - rows.length };
   }
 };
 
@@ -776,6 +788,28 @@ function listDialog(title, items, message = '', ok = false){
       <h2 style="margin:0 0 6px;">${escapeHtml(title)}</h2>
       ${items.length ? `<ul class="confirm-list">${items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
       ${message ? `<p class="text-dim" style="font-size:13px;">${escapeHtml(message)}</p>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.close-x').onclick = () => overlay.remove();
+  bindBackdropClose(overlay, () => overlay.remove());
+}
+
+// Import outcome: three cards (same data skipped / imported / failed) + the failure reasons.
+function importResultDialog({ same, added, failed, errors = [] }){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay confirm-modal active';
+  const card = (cls, n, label) => `<div class="import-card ${cls}"><b>${n}</b><span>${label}</span></div>`;
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="close-x" style="float:right;">✕</button>
+      <h2 style="margin:0 0 12px;">Hasil Import</h2>
+      <div class="import-cards">
+        ${card('same', same, 'Data sama')}
+        ${card('ok', added, 'Berhasil di-import')}
+        ${card('fail', failed, 'Gagal')}
+      </div>
+      ${errors.length ? `<ul class="confirm-list">${errors.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+        <p class="text-dim" style="font-size:13px;">Perbaiki baris yang gagal lalu import ulang file yang sama — data yang sudah masuk otomatis di-skip.</p>` : ''}
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('.close-x').onclick = () => overlay.remove();
