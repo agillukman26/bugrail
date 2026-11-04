@@ -766,15 +766,15 @@ const TestCaseModule = {
         Toast.show('Gagal membaca file. Pastikan file Excel/CSV yang valid.', 'error');
         return;
       }
-      const rows = sheets.flatMap(s => s.rows);
       const errors = sheets.flatMap(s => s.errors);
+      const failed = sheets.reduce((n, s) => n + (s.failed || 0), 0);
       const errorList = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
-      if (!rows.length){
-        if (errors.length) listDialog('Data import tidak sesuai', errorList, 'Tidak ada test case yang di-import. Perbaiki file lalu import ulang.');
-        else Toast.show('Tidak ada test case di file.', 'info');
-        return;
-      }
-      // Valid rows go in; rows with errors are skipped and listed below.
+      // Valid rows go in; ones already in this file (or repeated in the sheet) are skipped.
+      const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows),
+        App.state.testcases.filter(t => t.fileId === this.ui.activeFileId));
+      if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
+      const result = { same: dup.length, added: rows.length, failed, errors: errorList };
+      if (!rows.length){ importResultDialog(result); return; }
       rows.forEach(r => {
         // Always number imported rows fresh, in file order, per workspace — a
         // "Test Case ID" in the file (often from another workspace/export) is ignored.
@@ -789,14 +789,9 @@ const TestCaseModule = {
       const sheetsUsed = sheets.filter(s => s.rows.length).length;
       App.ensureDefaultFile();
       App.saveTestcases();
-      ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet${errors.length ? ' (sebagian baris dilewati karena error)' : ''}`);
+      ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet${dup.length ? `, ${dup.length} data sama di-skip` : ''}${failed ? `, ${failed} gagal` : ''}`);
       this.render();
-      if (errors.length){
-        listDialog('Sebagian data tidak di-import', errorList,
-          `${rows.length} test case berhasil di-import. Baris di atas dilewati — perbaiki lalu import ulang baris tersebut saja (baris yang sudah masuk jangan diulang agar tidak dobel).`);
-      } else {
-        Toast.show(`${rows.length} test case berhasil di-import.`, 'success');
-      }
+      importResultDialog(result);
     };
     reader.readAsArrayBuffer(file);
   },

@@ -54,4 +54,16 @@ assert.match(T.parseSheet('Data', [row({ Nama: 'A' }, 1)], 'Data', TYPES).errors
 // Bug Report template is refused, not half-imported as test cases.
 assert.deepStrictEqual([...T.parseSheet('Template', [row({ 'Module *': 'Login', 'Scenario': 'A', 'Bug Title *': 'x' }, 1)], '', TYPES).errors], ['Template: ini template Bug Report, bukan Test Case']);
 
+// Re-import: rows already in the file (case/spacing ignored) or repeated in the sheet are duplicates.
+const existing = [{ module: 'Login', scenario: 'Login valid', testCase: 'Email benar' }];
+const split = T.splitDuplicates([
+  { module: 'login', scenario: ' Login  valid ', testCase: 'email benar' },
+  { module: 'Login', scenario: 'Login invalid', testCase: '' },
+  { module: 'Login', scenario: 'Login invalid', testCase: '' }
+], existing);
+assert.strictEqual(split.fresh.length, 1);
+assert.strictEqual(split.dup.length, 2);
+// failed = filled rows rejected (blank rows don't count).
+assert.strictEqual(T.parseSheet('Login', many, 'Login', TYPES).failed, 7);
+
 console.log('tcimport.check OK');

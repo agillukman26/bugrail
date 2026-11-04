@@ -511,6 +511,13 @@ table.data-table th.center, table.data-table td.center{text-align:center;}
 .confirm-modal .modal{max-width:400px; text-align:center;}
 .confirm-list{margin:4px 0 12px; padding:10px 14px 10px 30px; max-height:50vh; overflow:auto; text-align:justify; font-size:13px; line-height:1.5; background:var(--status-failed-bg); border-radius:8px;}
 .confirm-list li{margin:2px 0;}
+.import-cards{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:0 0 12px;}
+.import-card{display:flex; flex-direction:column; align-items:center; gap:2px; padding:12px 8px; border-radius:10px;}
+.import-card b{font-size:24px; line-height:1.1;}
+.import-card span{font-size:12px; font-weight:600;}
+.import-card.same{background:var(--status-notrun-bg); color:var(--status-notrun);}
+.import-card.ok{background:var(--status-passed-bg); color:var(--status-passed);}
+.import-card.fail{background:var(--status-failed-bg); color:var(--status-failed);}
 .checklist-modal .modal{max-width:380px; text-align:left;}
 .checklist-dialog-list{max-height:260px; overflow-y:auto; overflow-x:hidden; margin-bottom:14px; border:1px solid var(--border); border-radius:var(--radius-s);}
 .checklist-dialog-item{display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box; padding:10px 12px; font-size:13.5px; text-align:left; cursor:pointer; border-bottom:1px solid var(--border);}
