@@ -1,0 +1,80 @@
+diff --git a/server/app.js b/server/app.js
+index 5efd84e..1b05fe3 100644
+--- a/server/app.js
++++ b/server/app.js
+@@ -123,6 +123,18 @@ async function validateSettingsWrite(req, res, next){
+     if (missing.length){
+       return res.status(409).json({ error: `Settings ditolak: akan menghapus ${missing.join(', ')} di server. Muat ulang halaman.` });
+     }
++    // Newer app builds keep passwords on the server only and send users without them. If such
++    // a tab ever writes here (rollback, deploy window), storing its users would wipe every
++    // password. 503, not 4xx: old and new clients both keep a 5xx write unsynced (a 4xx drops it).
++    const email = e => String(e || '').trim().toLowerCase();
++    const incoming = new Map((Array.isArray(value.users) ? value.users : []).filter(u => u).map(u => [email(u.email), u]));
++    const dropsPassword = (Array.isArray(stored.users) ? stored.users : []).some(u => {
++      const inc = u && u.password && incoming.get(email(u.email));
++      return inc && !inc.password;
++    });
++    if (dropsPassword){
++      return res.status(503).json({ error: 'Settings ditolak: akan menghapus password user di server. Muat ulang halaman.' });
++    }
+     next();
+   } catch (err) {
+     console.error('validateSettingsWrite failed', err);
+diff --git a/server/test/settings-guard.test.js b/server/test/settings-guard.test.js
+new file mode 100644
+index 0000000..94be327
+--- /dev/null
++++ b/server/test/settings-guard.test.js
+@@ -0,0 +1,51 @@
++const test = require('node:test');
++const assert = require('node:assert/strict');
++const db = require('../db');
++const { app } = require('../app');
++
++// Mocked DB only — .env points at the real database.
++function useDb(t, stored){
++  const writes = [];
++  const kv = {
++    findOne: async ({ _id }) => (_id === 'qa_settings' ? { _id, value: stored, rev: 1 } : null),
++    findOneAndUpdate: async (...a) => { writes.push(a); return { rev: 2 }; }
++  };
++  const original = db.getDb;
++  db.getDb = async () => ({ collection: () => kv });
++  t.after(() => { db.getDb = original; });
++  return writes;
++}
++
++async function put(t, value){
++  const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
++  t.after(() => server.close());
++  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/kv/qa_settings`, {
++    method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-role': 'admin' },
++    body: JSON.stringify({ value, rev: 1 })
++  });
++  return { status: res.status, body: await res.json() };
++}
++
++const stored = { theme: 'light', users: [{ email: 'A@x', password: 'pw', role: 'admin' }, { email: 'b@x', password: 'pw2', role: 'user' }] };
++
++test('settings guard: users sent without their stored password => 503, nothing written', async (t) => {
++  const writes = useDb(t, stored);
++  const { status, body } = await put(t, { theme: 'dark', users: [{ email: 'a@x', role: 'admin' }, { email: 'b@x', password: '', role: 'user' }] });
++  assert.equal(status, 503);
++  assert.equal(body.error, 'Settings ditolak: akan menghapus password user di server. Muat ulang halaman.');
++  assert.equal(writes.length, 0);
++});
++
++test('settings guard: one user missing its password is enough to refuse', async (t) => {
++  const writes = useDb(t, stored);
++  const { status } = await put(t, { theme: 'dark', users: [{ email: ' A@X ', password: 'pw', role: 'admin' }, { email: 'b@x', role: 'user' }] });
++  assert.equal(status, 503);
++  assert.equal(writes.length, 0);
++});
++
++test('settings guard: users with passwords (old clients) and removed users still save', async (t) => {
++  const writes = useDb(t, stored);
++  const { status } = await put(t, { theme: 'dark', users: [{ email: 'a@x', password: 'pw', role: 'admin' }] });
++  assert.equal(status, 200);
++  assert.equal(writes.length, 1);
++});

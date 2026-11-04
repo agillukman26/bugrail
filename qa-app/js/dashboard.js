@@ -18,14 +18,8 @@ const Dashboard = {
       notrun: count(tcs,'status','Open'),
       retest: count(tcs,'status','Retest'),
       totalBug: bugs.length,
-      critical: count(bugs,'severity','Critical'),
-      high: count(bugs,'severity','High'),
-      medium: count(bugs,'severity','Medium'),
-      low: count(bugs,'severity','Low'),
-      highest: bugs.filter(b => normPriority(b.priority) === 'Urgent').length,
-      prioHigh: count(bugs,'priority','High'),
-      prioMedium: count(bugs,'priority','Medium'),
-      prioLow: count(bugs,'priority','Low')
+      sevDist: BUG_LEVELS.distribution('severity', bugs),
+      prioDist: BUG_LEVELS.distribution('priority', bugs)
     };
   },
 
@@ -78,11 +72,9 @@ const Dashboard = {
             <span class="sum-card-sub">Open &rarr; Closed, dari ${resStats.resolvedCount} bug terukur</span>
           </div>
           ${this.donutCard('Distribusi Severity', s.totalBug, 'Total Bug',
-            ['Critical','High','Medium','Low'], [s.critical,s.high,s.medium,s.low],
-            ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'dashDonutSeverity')}
+            s.sevDist.labels, s.sevDist.counts, s.sevDist.colors, 'dashDonutSeverity')}
           ${this.donutCard('Distribusi Priority', s.totalBug, 'Total Bug',
-            ['Urgent','High','Medium','Low'], [s.highest,s.prioHigh,s.prioMedium,s.prioLow],
-            ['var(--sev-critical)','var(--sev-high)','var(--sev-medium)','var(--sev-low)'], 'dashDonutPriority')}
+            s.prioDist.labels, s.prioDist.counts, s.prioDist.colors, 'dashDonutPriority')}
         </div>
       </div>
 
@@ -92,8 +84,8 @@ const Dashboard = {
       </div>
     `;
 
-    this.donut('dashDonutSeverity', [s.critical,s.high,s.medium,s.low], ['#B0203A','#D64550','#D98A2B','#4E88C7']);
-    this.donut('dashDonutPriority', [s.highest,s.prioHigh,s.prioMedium,s.prioLow], ['#B0203A','#D64550','#D98A2B','#4E88C7']);
+    this.donut('dashDonutSeverity', s.sevDist.counts, s.sevDist.colors);
+    this.donut('dashDonutPriority', s.prioDist.counts, s.prioDist.colors);
     this.renderBar(tcs);
   },
 

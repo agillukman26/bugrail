@@ -88,6 +88,13 @@ const UserManagementModule = {
     document.getElementById('settUserSaveBtn').textContent = 'Simpan';
   },
 
+  // Once the server confirmed the save it has hashed/stored this password: drop it from memory and
+  // localStorage (no PUT). Only this user's, and only if still pw — another pending change stays for
+  // its own save. A false result keeps it for the unsynced re-send.
+  clearNewPassword(saved, email, pw){
+    Promise.resolve(saved).then(ok => { if (ok === true) Storage.forgetNewPasswords([[email, pw]]); });
+  },
+
   saveUser(){
     const users = App.state.settings.users || (App.state.settings.users = []);
     const emailInput = document.getElementById('settUserEmail');
@@ -104,7 +111,7 @@ const UserManagementModule = {
       }
       if (password){
         if (password.length < 4){ Toast.show('Password minimal 4 karakter.', 'error'); return; }
-        user.password = password;
+        user.newPassword = password;
       }
       user.role = role;
       user.workspaceIds = workspaceIds;
@@ -112,7 +119,7 @@ const UserManagementModule = {
       // database only read workspaceId — without it they treat the user as
       // workspace-less and create shared files visible in every workspace.
       user.workspaceId = workspaceIds[0] || null;
-      App.saveSettings();
+      this.clearNewPassword(App.saveSettings(), user.email, password);
       ActivityLog.record('user_update', `User ${email} diperbarui`);
       this.resetUserForm();
       this.closeUserModal();
@@ -125,8 +132,8 @@ const UserManagementModule = {
     if (Auth.findByEmail(users, email)){ Toast.show('Email sudah terdaftar.', 'error'); return; }
     if (password.length < 4){ Toast.show('Password minimal 4 karakter.', 'error'); return; }
 
-    users.push({ email, password, role, workspaceIds, workspaceId: workspaceIds[0] || null }); // workspaceId: see note above
-    App.saveSettings();
+    users.push({ email, newPassword: password, role, workspaceIds, workspaceId: workspaceIds[0] || null }); // workspaceId: see note above
+    this.clearNewPassword(App.saveSettings(), email, password);
     ActivityLog.record('user_create', `User ${email} dibuat`);
     this.resetUserForm();
     this.closeUserModal();

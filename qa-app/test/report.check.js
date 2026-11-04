@@ -133,4 +133,21 @@ const bizPartial = R.businessSummary(partial, R.reopenStats([]), R.speedStats([]
 assert.ok(bizPartial.verdictText.includes('BELUM LENGKAP'));
 assert.ok(bizPartial.points.some(p => p.includes('C')), 'unrated module named');
 
+// Last Run time per test case, from activity log labels
+{
+  const runs = R.lastRuns([
+    { ts: '2026-10-01T08:00:00.000Z', workspaceId: 'WS-1', label: 'Test Case LOG-0001 status diubah dari Open ke Failed (Run)' },
+    { ts: '2026-10-02T09:30:00.000Z', workspaceId: 'WS-1', label: 'Test Case LOG-0001 status diubah dari Failed ke Passed (Run)' },
+    { ts: '2026-10-03T10:00:00.000Z', workspaceId: 'WS-1', label: 'Test Case LOG-0001 diperbarui' },
+    { ts: '2026-10-04T10:00:00.000Z', workspaceId: 'WS-2', label: 'Test Case LOG-0001 status diubah dari Open ke Blocked (Run)' },
+    { ts: '2026-10-05T10:00:00.000Z', workspaceId: null, label: 'Test Case PAY-0002 status diubah dari Open ke Passed (Run)' },
+    { ts: '2026-10-06T10:00:00.000Z', workspaceId: 'WS-1', label: '3 test case status diubah menjadi Passed (bulk)' }
+  ]);
+  assert.strictEqual(runs.get('WS-1|LOG-0001'), '2026-10-02T09:30:00.000Z', 'latest Run wins, edits ignored');
+  assert.strictEqual(runs.get('WS-2|LOG-0001'), '2026-10-04T10:00:00.000Z', 'same code in another workspace kept apart');
+  assert.strictEqual(runs.get('|PAY-0002'), '2026-10-05T10:00:00.000Z', 'run logged without workspace');
+  assert.strictEqual(runs.size, 3, 'bulk entries are not per test case');
+  assert.strictEqual(R.lastRuns(undefined).size, 0);
+}
+
 console.log('report.check.js: all checks passed');

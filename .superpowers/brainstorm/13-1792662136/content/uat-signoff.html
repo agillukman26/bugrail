@@ -1,0 +1,33 @@
+<h2>Tambahan: tombol "Tidak bisa dicoba" dan sign-off</h2>
+<p class="subtitle">Tebakan saya. Koreksi di terminal.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Saat menjalankan satu baris (3 tombol)</div>
+    <div class="mockup-body" style="font-size:14px">
+      <div class="label">Yang seharusnya terjadi</div>
+      <div style="background:#f3f7ff;padding:8px;border-radius:6px">Muncul pesan "Email atau password salah".</div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="mock-button" style="background:#2e7d32">✔ Sesuai</button>
+        <button class="mock-button" style="background:#c62828">✘ Tidak sesuai</button>
+        <button class="mock-button" style="background:#757575">⏸ Tidak bisa dicoba</button>
+      </div>
+      <p style="font-size:12px;margin-top:10px">Di belakang layar tercatat otomatis: siapa, kapan, versi aplikasi (diisi QA saat membuat UAT). Hasil lama disimpan sebagai riwayat, tidak ditimpa.</p>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Setelah semua baris dicoba</div>
+    <div class="mockup-body" style="font-size:14px">
+      <div style="font-weight:600">Ringkasan UAT Anda</div>
+      <div>✔ Sesuai: 8 &nbsp; ✘ Tidak sesuai: 1 &nbsp; ⏸ Tidak bisa dicoba: 0</div>
+      <div style="margin-top:6px;color:#c62828">1 masalah masih menunggu perbaikan (prioritas Tinggi)</div>
+      <div class="label" style="margin-top:12px">Keputusan Anda</div>
+      <div>◯ Saya terima aplikasi ini</div>
+      <div>◉ Saya terima dengan catatan</div>
+      <div>◯ Saya tolak, harus diperbaiki dulu</div>
+      <textarea class="mock-input" style="width:100%;height:50px;margin-top:6px">Masalah login boleh diperbaiki setelah rilis</textarea>
+      <button class="mock-button" style="margin-top:8px">Kirim keputusan</button>
+      <p style="font-size:12px;margin-top:8px">Tercatat nama, waktu, dan keputusan. QA/PM bisa unduh sebagai PDF bukti UAT.</p>
+    </div>
+  </div>
+</div>

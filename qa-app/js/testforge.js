@@ -182,7 +182,7 @@ const TestForgeModule = {
     try {
       const res = await fetch(`${API_BASE}/testforge/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           mode: this.ui.mode,
           content: this.ui.content,
@@ -191,6 +191,7 @@ const TestForgeModule = {
           apiKey: App.state.settings.geminiApiKey || undefined
         })
       });
+      if (res.status === 401){ Auth.sessionExpired(); return; }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generate gagal');
       this.ui.staged = data.testcases || [];

@@ -1,0 +1,80 @@
+<h2>Usulan alur UAT untuk end user</h2>
+<p class="subtitle">Tebakan saya. Koreksi bagian mana yang salah. Klik panel yang paling mendekati keinginan kamu.</p>
+
+<div class="section">
+<h3>1. QA: ubah test case jadi checklist UAT</h3>
+<div class="mockup">
+  <div class="mockup-header">Halaman Test Case: pilih test case lalu klik "Jadikan UAT"</div>
+  <div class="mockup-body">
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="mock-button">Jadikan UAT (3 dipilih)</button>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="text-align:left;border-bottom:1px solid #ccc"><th>☑</th><th>Kode</th><th>Modul</th><th>Skenario</th></tr>
+      <tr><td>☑</td><td>LOG-0001</td><td>Login</td><td>Login dengan email benar</td></tr>
+      <tr><td>☑</td><td>LOG-0002</td><td>Login</td><td>Login password salah</td></tr>
+      <tr><td>☑</td><td>TRX-0004</td><td>Transaksi</td><td>Buat pesanan baru</td></tr>
+      <tr><td>☐</td><td>TRX-0005</td><td>Transaksi</td><td>Batalkan pesanan</td></tr>
+    </table>
+    <p style="font-size:12px;margin-top:8px">Setelah itu muncul form edit per baris: QA bisa menulis ulang langkah dengan bahasa awam, menghapus istilah teknis, dan menentukan siapa end user yang ditugaskan.</p>
+  </div>
+</div>
+</div>
+
+<div class="section">
+<h3>2. End user: daftar UAT</h3>
+<div class="mockup">
+  <div class="mockup-header">Yang dilihat end user setelah login (hanya halaman ini)</div>
+  <div class="mockup-body">
+    <div style="font-size:18px;font-weight:600">UAT Aplikasi Penjualan, Rilis Oktober</div>
+    <div style="margin:6px 0 4px;font-size:13px">Sudah dicoba 1 dari 3</div>
+    <div style="background:#ddd;height:10px;border-radius:5px"><div style="background:#4caf50;width:33%;height:10px;border-radius:5px"></div></div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+      <div style="border:1px solid #ccc;border-radius:8px;padding:12px;display:flex;justify-content:space-between"><span>1. Masuk ke aplikasi dengan email Anda</span><span style="color:#2e7d32">✔ Sesuai</span></div>
+      <div style="border:2px solid #1976d2;border-radius:8px;padding:12px;display:flex;justify-content:space-between"><span>2. Coba masuk dengan password yang salah</span><span>▶ Mulai</span></div>
+      <div style="border:1px solid #ccc;border-radius:8px;padding:12px;display:flex;justify-content:space-between"><span>3. Buat pesanan baru</span><span>▶ Mulai</span></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section">
+<h3>3. End user: menjalankan satu baris</h3>
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Langkah demi langkah</div>
+    <div class="mockup-body" style="font-size:14px">
+      <div style="font-weight:600;margin-bottom:6px">2. Coba masuk dengan password yang salah</div>
+      <div class="label">Yang perlu Anda lakukan</div>
+      <div>☑ Buka halaman login</div>
+      <div>☑ Isi email Anda</div>
+      <div>☐ Isi password asal, misalnya "salah123"</div>
+      <div>☐ Klik tombol Masuk</div>
+      <div class="label" style="margin-top:10px">Yang seharusnya terjadi</div>
+      <div style="background:#f3f7ff;padding:8px;border-radius:6px">Muncul pesan "Email atau password salah" dan Anda tetap di halaman login.</div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="mock-button" style="background:#2e7d32">✔ Sesuai</button>
+        <button class="mock-button" style="background:#c62828">✘ Tidak sesuai</button>
+      </div>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Kalau klik "Tidak sesuai"</div>
+    <div class="mockup-body" style="font-size:14px">
+      <div class="label">Apa yang terjadi di layar Anda?</div>
+      <textarea class="mock-input" style="width:100%;height:70px">Halaman jadi putih, tidak ada pesan apa-apa</textarea>
+      <div class="label" style="margin-top:8px">Lampirkan foto layar (opsional)</div>
+      <div class="placeholder">📷 Tarik gambar ke sini</div>
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="mock-button">Kirim</button>
+      </div>
+      <p style="font-size:12px;margin-top:8px">Setelah dikirim: kembali ke daftar, baris ditandai "✘ Tidak sesuai". QA mendapat notifikasi dan draft bug otomatis yang terhubung ke test case.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="ok" onclick="toggleSelect(this)"><div class="letter">✔</div><div class="content"><h3>Alurnya sudah pas</h3><p>Lanjut ke detail berikutnya</p></div></div>
+  <div class="option" data-choice="change" onclick="toggleSelect(this)"><div class="letter">✎</div><div class="content"><h3>Ada yang perlu diubah</h3><p>Jelaskan di terminal</p></div></div>
+</div>

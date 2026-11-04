@@ -73,7 +73,7 @@ const App = {
   saveBugs(){ const saved = Storage.set(STORAGE_KEYS.BUGS, this.state.bugs); this.onDataChanged(); return saved; },
   saveFiles(){ Storage.set(STORAGE_KEYS.FILES, this.state.files); },
   saveActivityLog(){ Storage.set(STORAGE_KEYS.ACTIVITY_LOG, this.state.activityLog); },
-  saveSettings(){ Storage.set(STORAGE_KEYS.SETTINGS, this.state.settings); },
+  saveSettings(){ return Storage.set(STORAGE_KEYS.SETTINGS, this.state.settings); },
 
   /* Called after any mutation — keeps sidebar counts & any open
      dashboard/summary views in sync (simple pub/sub substitute). */
@@ -127,6 +127,7 @@ const App = {
       rolepermission: ['Role Permission', 'Atur hak akses tiap role'],
       settings: ['Settings', 'Preferensi aplikasi & data'],
       masterstatus: ['Status Bug Report', 'Master data status bug report'],
+      masterlevel: ['Severity & Priority', 'Master data severity & priority bug report'],
       activitylog: ['Activity Log', 'Riwayat aktivitas user dari login sampai logout']
     };
     const [t, s] = titles[page] || [page, ''];
@@ -141,6 +142,7 @@ const App = {
     if (page === 'summary') Summary.render();
     if (page === 'report') ReportModule.render();
     if (page === 'masterstatus') MasterStatusModule.render();
+    if (page === 'masterlevel') MasterLevelModule.render();
     if (page === 'activitylog') ActivityLogModule.render();
 
     document.getElementById('sidebar').classList.remove('open');
@@ -168,7 +170,7 @@ const App = {
      that key and redraw the current page, no reload needed. */
   startLive(){
     if (this._live || Storage.offlineBoot || typeof EventSource !== 'function') return;
-    this._live = new EventSource(`${API_BASE}/events`);
+    this._live = new EventSource(`${API_BASE}/events?token=${encodeURIComponent(sessionStorage.getItem('qa_sid') || '')}`);
     let dropped = false;
     this._live.onerror = () => { dropped = true; }; // the browser reconnects by itself
     this._live.onopen = () => { // back after a drop: catch up on whatever was missed
@@ -179,6 +181,7 @@ const App = {
     };
     this._live.onmessage = e => {
       const { key, rev } = JSON.parse(e.data);
+      if (key === 'notif_seen') return NotificationCenter.syncSeen(); // someone read their bell somewhere
       if (rev !== Storage.revs[key]) this.pullLive(key);
     };
   },
@@ -223,6 +226,7 @@ const App = {
     setVisible('testcase', Auth.can('testcase_read'));
     setVisible('bugreport', Auth.can('bugreport_read'));
     setVisible('masterstatus', Auth.can('master'));
+    setVisible('masterlevel', Auth.can('master'));
     setVisible('usermanagement', Auth.can('usermanagement'));
     setVisible('rolepermission', Auth.isAdmin());
     setVisible('workspace', Auth.isAdmin());
@@ -435,7 +439,7 @@ const App = {
      and importexport (no gate) are checked separately in canAccessPage(). */
   PAGE_PERMISSIONS: {
     dashboard: 'dashboard', summary: 'summary', report: 'report', testcase: 'testcase_read',
-    bugreport: 'bugreport_read', bugdetail: 'bugreport_read', masterstatus: 'master', usermanagement: 'usermanagement', settings: 'settings',
+    bugreport: 'bugreport_read', bugdetail: 'bugreport_read', masterstatus: 'master', masterlevel: 'master', usermanagement: 'usermanagement', settings: 'settings',
     activitylog: 'activitylog'
   },
   canAccessPage(page){

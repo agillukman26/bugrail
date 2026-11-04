@@ -20,6 +20,22 @@ const ReportCalc = {
 
   isOpen(bug){ return !this.DONE_STATUSES.includes(bug.status); },
   moduleOf(x){ return x.module || '(Tanpa Module)'; },
+
+  /* Fallback for test cases run before tc.lastRunAt existed: latest Run time, read from the activity log (testcase.js submitExecute
+     logs "Test Case <code> status diubah dari X ke Y (Run)"). Key: "<workspaceId>|<code>",
+     workspace '' when logged from "Semua workspace" (codes repeat across workspaces).
+     ponytail: parses the log label and only sees Runs that changed status, within the
+     1000-entry log cap; store tcId on the entry if this needs to be exact. */
+  lastRuns(log){
+    const out = new Map();
+    (log || []).forEach(e => {
+      const m = /^Test Case (\S+) status diubah .*\(Run\)$/.exec(e.label || '');
+      if (!m) return;
+      const key = `${e.workspaceId || ''}|${m[1]}`;
+      if (!out.has(key) || out.get(key) < e.ts) out.set(key, e.ts);
+    });
+    return out;
+  },
   RISK: { UNRATED: 0, NO_GO: 1, CONDITIONAL: 2, GO: 3 }, // table order: riskiest first
 
   /* Verdict is judged per module; the app verdict is the worst module
@@ -85,7 +101,7 @@ const ReportCalc = {
       if (highOver) items.push(`Tutup ${m.openHigh.length} bug High di ${m.module}`);
       if (m.notRun && m.passRate !== null) items.push(`Jalankan ${m.notRun} test tersisa di ${m.module}`);
     });
-    return { items: items.slice(0, limit), more: Math.max(0, items.length - limit) };
+    return { items: items.slice(0, limit), more: Math.max(0, items.length - limit), rest: items.slice(limit) };
   },
 
   /* Contextual filter: each module / round option with its test case count in
@@ -320,6 +336,8 @@ const ReportModule = {
   filters: { fileId: '', module: '' },
   ALL_FILES: 'all',
   open: null,  // filter dropdown currently open: 'module' | 'round' | null
+  expanded: new Set(), // module names whose test case list is open in "Kesiapan per module"
+  TC_STATUS_ORDER: ['Failed', 'Blocked', 'Retest', 'Open', 'Passed'], // expanded list: problems first
   tab: 'golive', // 'golive' (PM/BA) | 'qa' (internal QA view)
   URL_KEYS: { module: 'rptModule', fileId: 'rptRound' },
   VERDICT: {
@@ -392,6 +410,7 @@ const ReportModule = {
   },
 
   renderNow(){
+    this.closeTip(); // its anchor button is about to be replaced
     this._renderToken = (this._renderToken || 0) + 1;
     this._renderedKey = JSON.stringify(this.filters);
     const allTcs = TestCaseModule.all(), allBugs = BugReportModule.all();
@@ -404,12 +423,12 @@ const ReportModule = {
     const opts = ReportCalc.scopeOptions(allTcs, allBugs, files, { module: this.filters.module, fileId: this.fileFilter() });
     // pick: no file chosen yet · empty: no test case at all · filtered: combo is empty · data: partial or full
     const state = !this.filters.fileId ? 'pick' : !allTcs.length ? 'empty' : !tcs.length ? 'filtered' : 'data';
-    this._last = { g, r, s, biz, state, bugs, scope: this.scopeLabel(files) };
+    this._last = { g, r, s, biz, state, bugs, tcs, scope: this.scopeLabel(files) };
     if (App.state.currentPage === 'report') history.replaceState(history.state, '', this.urlWith(location.href, this.filters));
 
     const body = state === 'pick' || state === 'empty' ? this.pickView(opts, files, state)
       : state === 'filtered' ? this.filteredView(opts, allBugs, files)
-      : this.tab === 'qa' ? this.qaView(tcs, bugs) : this.dataView(g, r, bugs, files);
+      : this.tab === 'qa' ? this.qaView(tcs, bugs) : this.dataView(g, r, bugs, files, tcs);
     // Pick / empty: no toolbar — the file picker sits inside the card instead.
     document.getElementById('rptBody').innerHTML = `<div class="rpt">${state === 'pick' || state === 'empty' ? '' : this.filterBar(opts, files, state)}${body}</div>`;
   },
@@ -429,6 +448,7 @@ const ReportModule = {
         ${this.dropdown('round', 'Putaran', fileName || 'Semua putaran testing', off, () => this.roundMenu(opts))}
         ${active ? '<button type="button" class="btn sm ghost" data-act="reset">Reset</button>' : ''}
         <div class="spacer"></div>
+        <button type="button" class="btn sm rpt-back" data-act="back" title="Kembali ke pilihan file"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Kembali</button>
         ${this.tab === 'golive' ? `${state === 'data' ? '<button type="button" class="btn sm" data-act="copy">Salin Ringkasan</button>' : ''}
         <button type="button" class="btn sm primary" data-act="pdf" ${state === 'data' ? '' : 'disabled'}>Export PDF</button>` : ''}
       </div>`;
@@ -591,7 +611,71 @@ const ReportModule = {
   },
 
   /* ---- States 3 & 4: partial (some module unrated) or complete data ---- */
-  dataView(g, r, bugs, files){
+  /* ⓘ next to a module's verdict: small tooltip with why, and why Blocked counts as
+     "dijalankan". Fixed-position on <body> — inside the scrolling table it'd be clipped. */
+  // "+ N lainnya" opens the rest in place, then sits under it as "Tampilkan lebih sedikit"; items are ready <li> strings.
+  moreList(items, cls){
+    return items.length ? `<ul class="${cls} rpt-more-list" hidden>${items.join('')}</ul>
+      <button type="button" class="rpt-more" data-act="more" data-n="${items.length}" aria-expanded="false">+ ${items.length} lainnya</button>` : '';
+  },
+  toggleMore(btn){
+    const list = btn.previousElementSibling, open = list.hidden;
+    list.hidden = !open;
+    btn.setAttribute('aria-expanded', open);
+    btn.textContent = open ? 'Tampilkan lebih sedikit' : `+ ${btn.dataset.n} lainnya`;
+  },
+
+  toggleModuleTip(btn){
+    const name = btn.dataset.value;
+    const m = this._last && this._last.g.modules.find(x => x.module === name);
+    if (!m) return;
+    const tcs = this._last.tcs.filter(t => ReportCalc.moduleOf(t) === name);
+    const label = { Open: 'Belum jalan' };
+    const counts = this.TC_STATUS_ORDER.map(st => [st, tcs.filter(t => t.status === st).length]).filter(([, n]) => n)
+      .map(([st, n]) => `${n} ${label[st] || st}`).join(' · ');
+    this.toggleTip(btn, `module:${name}`, `<b>${escapeHtml(m.reason || this.VERDICT[m.verdict][1])}</b>
+      <span>${escapeHtml(counts)}</span>
+      <span class="rpt-tip-dim">Dijalankan ${m.executed}/${m.total} = test case yang sudah dicoba QA, apa pun hasilnya (Passed, Failed, atau Blocked).${m.blocked
+        ? ` ${m.blocked} Blocked artinya sudah dicoba tapi terhalang (mis. server atau data belum siap), jadi belum lulus dan ikut menahan vonis.` : ''}</span>`);
+  },
+  // "N lainnya" on the open-bugs card: the open bugs that are neither Critical nor High, each opens its detail.
+  toggleOtherBugsTip(btn){
+    const g = this._last && this._last.g;
+    if (!g) return;
+    const list = g.openBugs.filter(b => b.severity !== 'Critical' && b.severity !== 'High');
+    this.toggleTip(btn, 'bugs-others', `<b>Bug terbuka selain Critical / High</b>
+      <ul class="rpt-tip-list">${list.map(b => `<li><button type="button" class="rpt-link" data-act="bug" data-id="${escapeHtml(b.id)}"><span class="rpt-mono">${escapeHtml(bugCode(b))}</span> ${escapeHtml(b.title || '')}</button><span class="rpt-tip-dim">${escapeHtml(b.severity || '-')} · ${escapeHtml(b.status)}</span></li>`).join('')}</ul>`);
+  },
+  // Small tooltip under `btn`, on <body> so the table's scroll box can't clip it. Same key again = close.
+  toggleTip(btn, key, html){
+    const same = this._tip && this._tip.dataset.for === key;
+    this.closeTip();
+    if (same) return;
+    const tip = document.createElement('div');
+    tip.className = 'rpt-tip';
+    tip.setAttribute('role', 'tooltip');
+    tip.dataset.for = key;
+    tip.innerHTML = html;
+    tip.addEventListener('click', e => { // tip lives outside the page, so its links need their own handler
+      const b = e.target.closest('[data-act="bug"]');
+      if (b){ this.closeTip(); BugReportModule.openDetail(b.dataset.id); }
+    });
+    document.body.appendChild(tip);
+    const r = btn.getBoundingClientRect();
+    tip.style.top = `${r.bottom + 6}px`;
+    tip.style.left = `${Math.max(8, Math.min(r.right - tip.offsetWidth, innerWidth - tip.offsetWidth - 8))}px`;
+    btn.setAttribute('aria-expanded', 'true');
+    this._tip = tip;
+    this._tipBtn = btn;
+  },
+  closeTip(){
+    if (!this._tip) return;
+    this._tipBtn.setAttribute('aria-expanded', 'false');
+    this._tip.remove();
+    this._tip = this._tipBtn = null;
+  },
+
+  dataView(g, r, bugs, files, tcs){
     const canInput = Auth.can('testcase_create');
     const canSee = App.canAccessPage('testcase');
     const unrated = g.modules.filter(m => m.verdict === 'UNRATED');
@@ -617,7 +701,7 @@ const ReportModule = {
         ...rated.filter(m => m.notRun).map(m => `<li><span>Jalankan ${m.notRun} test case tersisa di <b>${escapeHtml(m.module)}</b></span>${canSee ? '<button type="button" class="rpt-link" data-act="goto" data-page="testcase">Buka →</button>' : ''}</li>`)
       ];
       box = `<div class="rpt-box rpt-box-info"><div class="rpt-box-title">Supaya report lengkap</div>
-        <ul class="rpt-todo">${items.slice(0, 5).join('')}</ul>${items.length > 5 ? `<div class="rpt-hint">+ ${items.length - 5} lainnya</div>` : ''}</div>`;
+        <ul class="rpt-todo">${items.slice(0, 5).join('')}</ul>${this.moreList(items.slice(5), 'rpt-todo')}</div>`;
     } else if (g.verdict === 'GO'){
       box = `<div class="rpt-box rpt-box-go"><div class="rpt-box-title">Siap go-live</div>
         <p>Tidak ada yang menahan. Lanjutkan persiapan rilis: sosialisasi pengguna, rencana rollback, dan monitoring setelah rilis.</p></div>`;
@@ -625,7 +709,7 @@ const ReportModule = {
       const fix = ReportCalc.mustFix(g, bugCode);
       const nogo = g.verdict === 'NO_GO';
       box = `<div class="rpt-box ${nogo ? 'rpt-box-nogo' : 'rpt-box-cond'}"><div class="rpt-box-title">${nogo ? 'Harus selesai sebelum go-live' : 'Perlu disepakati sebelum go-live'}</div>
-        <ul class="rpt-dots">${fix.items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>${fix.more ? `<div class="rpt-hint">+ ${fix.more} lainnya</div>` : ''}</div>`;
+        <ul class="rpt-dots">${fix.items.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>${this.moreList(fix.rest.map(x => `<li>${escapeHtml(x)}</li>`), 'rpt-dots')}</div>`;
     }
 
     const verdictCard = `
@@ -663,7 +747,7 @@ const ReportModule = {
           ${g.openBugs.length ? `<div class="rpt-sev-row">
             ${g.openCritical.length ? `<span class="rpt-sev rpt-sev-crit">${g.openCritical.length} Critical</span>` : ''}
             ${g.openHigh.length ? `<span class="rpt-sev rpt-sev-high">${g.openHigh.length} High</span>` : ''}
-            ${others ? `<span class="rpt-sev">${others} lainnya</span>` : ''}</div>` : ''}
+            ${others ? `<button type="button" class="rpt-sev rpt-sev-btn" data-act="bugs-others" aria-expanded="false">${others} lainnya ⓘ</button>` : ''}</div>` : ''}
           <div class="rpt-stat-foot">${g.openBugs.length ? `Dari ${bugs.length} bug tercatat dalam scope ini` : `Tidak ada bug terbuka dari ${bugs.length} bug tercatat`}</div>
         </div>
         <div class="rpt-card rpt-stat">
@@ -682,13 +766,25 @@ const ReportModule = {
         <td>${this.chip('UNRATED', 'sm')}</td>
       </tr>` : `
       <tr>
-        <td class="rpt-td-name">${escapeHtml(m.module)}</td>
+        <td class="rpt-td-name"><button type="button" class="rpt-expand" data-act="expand" data-value="${escapeHtml(m.module)}" aria-expanded="${this.expanded.has(m.module)}">${this.expanded.has(m.module) ? '▾' : '▸'} ${escapeHtml(m.module)}</button></td>
         <td><div class="rpt-passcell"><div class="rpt-bar"><span class="rpt-bar-${this.VERDICT[m.verdict][0]}" style="width:${m.passRate || 0}%"></span></div><span class="rpt-mono rpt-b">${this.pct(m.passRate)}</span></div></td>
         <td class="rpt-num-cell">${m.executed}/${m.total}</td>
         <td class="rpt-num-cell">${m.blocked}</td>
         <td class="rpt-num-cell">${m.openCritical.length} / ${m.openHigh.length}</td>
-        <td>${this.chip(m.verdict, 'sm')}</td>
-      </tr>`;
+        <td class="rpt-td-verdict">${this.chip(m.verdict, 'sm')}<button type="button" class="rpt-info-btn" data-act="module-info" data-value="${escapeHtml(m.module)}" aria-label="Kenapa vonis ${escapeHtml(m.module)}" aria-expanded="false">ⓘ</button></td>
+      </tr>${this.expanded.has(m.module) ? tcList(m.module) : ''}`;
+    // Status + title, problems first; a title opens the test case detail popup for whoever may read test cases.
+    const canReadTc = Auth.can('testcase_read');
+    const rank = t => { const i = this.TC_STATUS_ORDER.indexOf(t.status); return i < 0 ? this.TC_STATUS_ORDER.length : i; };
+    const runs = ReportCalc.lastRuns(App.state.activityLog);
+    const ranAt = t => { const ws = fileWorkspace(t.fileId) || '', code = tcCode(t); return t.lastRunAt || runs.get(`${ws}|${code}`) || runs.get(`|${code}`); };
+    const tcList = mod => `
+      <tr class="rpt-tr-tcs"><td colspan="6"><ul class="rpt-tc-list"><li class="rpt-tc-head" aria-hidden="true"><span>Status</span><span>Test case</span><span>Terakhir dijalankan</span></li>${tcs.filter(t => ReportCalc.moduleOf(t) === mod).sort((a, b) => rank(a) - rank(b)).map(t => {
+        const title = escapeHtml(t.testCase || t.scenario || tcCode(t));
+        const at = ranAt(t);
+        return `<li>${TestCaseModule.statusBadge(t.status)}${canReadTc ? `<button type="button" class="rpt-link" data-act="tc" data-id="${escapeHtml(t.id)}">${title}</button>` : `<span>${title}</span>`}
+          <span class="rpt-tc-at rpt-mono rpt-dim"${at || t.status === 'Open' || t.executionDate ? '' : ' title="Run-nya tidak ada di activity log (bulk, status tidak berubah, atau log sudah terhapus)"'}>${at ? formatDateTime(at) : t.status === 'Open' ? 'Belum dijalankan' : t.executionDate ? formatDate(t.executionDate) : 'Tidak tercatat'}</span></li>`;
+      }).join('')}</ul></td></tr>`;
     const table = this.filters.module ? '' : `
       <section class="rpt-card rpt-section">
         <div class="rpt-block-head"><h2>Kesiapan per module</h2><span class="rpt-hint">${unrated.length ? 'Module yang belum dinilai ditaruh paling atas' : 'Diurutkan dari yang paling berisiko'}</span></div>
@@ -757,7 +853,7 @@ const ReportModule = {
         ${q.retest.length ? `<div class="rpt-reopen-list">${q.retest.map(x => `
           <button type="button" class="rpt-reopen-row" data-act="bug" data-id="${escapeHtml(x.bug.id)}">
             <span class="rpt-mono rpt-dim rpt-reopen-id">${escapeHtml(bugCode(x.bug))}</span>
-            <span class="rpt-reopen-text"><b>${escapeHtml(x.bug.title || '')}</b><span>${escapeHtml(ReportCalc.moduleOf(x.bug))} · Tester: ${escapeHtml(x.bug.tester || '-')}</span></span>
+            <span class="rpt-reopen-text"><b>${escapeHtml(x.bug.title || '')}</b><span>${escapeHtml(ReportCalc.moduleOf(x.bug))} · Tester: ${escapeHtml(userName(x.bug.tester) || '-')}</span></span>
             <span class="rpt-sev${sevCls(x.bug.severity)}">${escapeHtml(x.bug.severity || '-')}</span>
             <span class="rpt-mono rpt-b rpt-reopen-count${x.ageDays > ReportCalc.RETEST_LATE_DAYS ? ' rpt-t-nogo' : ''}">${days(x.ageDays)}</span>
           </button>`).join('')}</div>` : `
@@ -950,6 +1046,7 @@ const ReportModule = {
     const page = document.getElementById('page-report');
     page.addEventListener('click', e => {
       const el = e.target.closest('[data-act]');
+      if (!el || !['module-info', 'bugs-others'].includes(el.dataset.act)) this.closeTip();
       if (!el || el.disabled){
         if (this.open && !e.target.closest('.rpt-menu')){ this.open = null; this.render(); }
         return;
@@ -966,17 +1063,28 @@ const ReportModule = {
         case 'pdf': this.exportPDF(); break;
         case 'export-reopen': this.exportReopenExcel(); break;
         case 'goto': App.goTo(el.dataset.page); break;
+        case 'back': this.setFilters({ fileId: '', module: '' }); break; // to the "pick a file" start card
         case 'bug': BugReportModule.openDetail(el.dataset.id); break;
+        case 'tc': TestCaseModule.openDetail(el.dataset.id); break;
+        case 'module-info': this.toggleModuleTip(el); break;
+        case 'bugs-others': this.toggleOtherBugsTip(el); break;
+        case 'more': this.toggleMore(el); break;
+        case 'expand': this.expanded.has(v) ? this.expanded.delete(v) : this.expanded.add(v); this.render(); break;
       }
     });
     // Close an open filter menu on outside click / Escape. composedPath() still holds
     // the report page even when its click handler already re-rendered the target away.
     document.addEventListener('click', e => {
+      if (this._tip && !e.composedPath().includes(page) && !e.target.closest('.rpt-tip')) this.closeTip();
       if (this.open && !e.composedPath().includes(page)){ this.open = null; this.render(); }
     });
     document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') this.closeTip();
       if (e.key === 'Escape' && this.open){ this.open = null; this.render(); }
     });
+    // The tip is fixed-position: any scroll (page or the table's own) would leave it floating.
+    addEventListener('scroll', e => { if (!this._tip || !this._tip.contains(e.target)) this.closeTip(); }, true); // scrolling the tip's own list keeps it open
+    addEventListener('resize', () => this.closeTip());
   }
 };
 
