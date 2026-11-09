@@ -96,6 +96,12 @@ const App = {
       if (replace || !history.state) history.replaceState({ page }, '', url);
       else if (history.state.page !== page) history.pushState({ page }, '', url);
     }
+    // Test Case <-> Bug Report share files: the file open on the page we leave opens on the next one.
+    const fileView = { testcase: TestCaseModule, bugreport: BugReportModule, bugdetail: BugReportModule };
+    const from = fileView[this.state.currentPage], to = fileView[page];
+    if (from && to && from !== to && from.ui.activeFileId && to.ui.activeFileId !== from.ui.activeFileId){
+      to.ui.activeFileId = from.ui.activeFileId; to.ui.page = 1; to.ui.selected.clear();
+    }
     this.state.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
