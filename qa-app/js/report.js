@@ -398,7 +398,7 @@ const ReportModule = {
     if (!this._urlRead){ this._urlRead = true; if (this.hasUrlFilter()) this.readUrl(); }
     const key = JSON.stringify(this.filters);
     const heavy = this.filters.fileId && key !== this._renderedKey && typeof requestAnimationFrame === 'function'
-      && TestCaseModule.all().length + BugReportModule.all().length >= this.LOADER_MIN_ITEMS;
+      && TestCaseModule.all().length + BugReportModule.reported().length >= this.LOADER_MIN_ITEMS;
     if (!heavy) return this.renderNow();
     const token = this._renderToken = (this._renderToken || 0) + 1;
     document.getElementById('rptBody').innerHTML = `
@@ -413,7 +413,7 @@ const ReportModule = {
     this.closeTip(); // its anchor button is about to be replaced
     this._renderToken = (this._renderToken || 0) + 1;
     this._renderedKey = JSON.stringify(this.filters);
-    const allTcs = TestCaseModule.all(), allBugs = BugReportModule.all();
+    const allTcs = TestCaseModule.all(), allBugs = BugReportModule.reported();
     const files = Auth.visibleFiles(App.state.files);
     const tcs = this.filtered(allTcs), bugs = this.filtered(allBugs);
     const g = ReportCalc.goLive(tcs, bugs);

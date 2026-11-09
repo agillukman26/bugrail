@@ -40,6 +40,8 @@ const Auth = {
     { key: 'testcase_update', label: 'Test Case — Edit' },
     { key: 'testcase_delete', label: 'Test Case — Hapus' },
     { key: 'testcase_fileShare', label: 'Test Case — Share File antar Workspace' },
+    { key: 'testcase_import', label: 'Test Case — Import' },
+    { key: 'testcase_export', label: 'Test Case — Export' },
     { key: 'activitylog', label: 'Activity Log (lihat)' },
     { key: 'bugreport_fileCreate', label: 'Bug Report — Buat File' },
     { key: 'bugreport_create', label: 'Bug Report — Tambah' },
@@ -47,6 +49,9 @@ const Auth = {
     { key: 'bugreport_update', label: 'Bug Report — Edit (semua field)' },
     { key: 'bugreport_updateStatusPriority', label: 'Bug Report — Edit Status/Priority saja' },
     { key: 'bugreport_delete', label: 'Bug Report — Hapus' },
+    { key: 'bugreport_priority', label: 'Bug Report — Ubah Priority (tanpa ini Priority terkunci; tanpa Edit = hanya Priority yang bisa diubah)' },
+    { key: 'bugreport_import', label: 'Bug Report — Import' },
+    { key: 'bugreport_export', label: 'Bug Report — Export' },
     { key: 'bugreport_board', label: 'Bug Report — Board (drag & drop)' },
     { key: 'bugreport_statusQA', label: 'Bug Report — Status QA (hanya dari Retest ke Open/Blocked/Resolved/Closed, wajib keterangan)' },
     { key: 'master', label: 'Master — Status Bug Report, Severity & Priority' },
@@ -58,9 +63,9 @@ const Auth = {
      stored in settings.rolePermissions. Admin is always full-access and never
      goes through this matrix (see can(), hardcoded to avoid self-lockout). */
   DEFAULT_ROLE_PERMISSIONS: {
-    pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_updateStatusPriority: true },
-    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true },
-    qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true },
+    pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_priority: true, bugreport_export: true },
+    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, testcase_import: true, testcase_export: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true, bugreport_import: true, bugreport_export: true },
+    qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_import: true, testcase_export: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true, bugreport_export: true },
     user_umum: { testcase_read: true, bugreport_read: true }
   },
 

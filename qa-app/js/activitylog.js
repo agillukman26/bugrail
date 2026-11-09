@@ -15,7 +15,8 @@ const ActivityLog = {
     return entries.length > this.MAX_ENTRIES ? entries.slice(entries.length - this.MAX_ENTRIES) : entries;
   },
 
-  record(action, label){
+  // evidence: { from, to } when a test case's evidence changed — shown in the detail popup.
+  record(action, label, evidence){
     const entry = {
       id: 'LOG-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
       ts: nowISO(),
@@ -25,6 +26,7 @@ const ActivityLog = {
       action,
       label
     };
+    if (evidence && evidence.from !== evidence.to) entry.evidence = { from: evidence.from || '', to: evidence.to || '' };
     App.state.activityLog = this.trim([...(App.state.activityLog || []), entry]);
     App.saveActivityLog();
   },
@@ -136,6 +138,7 @@ const ActivityLogModule = {
         ${field('Workspace', escapeHtml(this.workspaceName(entry)))}
         ${field('Jenis Aksi', `<span class="badge st-notrun">${escapeHtml(entry.action)}</span>`)}
         ${field('Detail', escapeHtml(entry.label))}
+        ${entry.evidence ? field('Evidence Lama', entry.evidence.from ? linkify(entry.evidence.from) : '-') + field('Evidence Baru', entry.evidence.to ? linkify(entry.evidence.to) : '-') : ''}
       </div>`;
     document.getElementById('alDetailModalOverlay').classList.add('active');
   },
