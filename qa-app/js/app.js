@@ -96,6 +96,10 @@ const App = {
       if (replace || !history.state) history.replaceState({ page }, '', url);
       else if (history.state.page !== page) history.pushState({ page }, '', url);
     }
+    // Menu change: file/filter/search picks don't carry over to the next visit.
+    // Bug Report <-> its detail page is one view (Back from detail keeps the open file).
+    const prev = this.state.currentPage, sameView = p => p === 'bugreport' || p === 'bugdetail';
+    if (prev && prev !== page && !(sameView(prev) && sameView(page))) this.resetViewState();
     this.state.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
@@ -448,18 +452,31 @@ const App = {
     const perm = this.PAGE_PERMISSIONS[page];
     return perm ? Auth.can(perm) : false;
   },
+  /* Clears every page's open file, search, filters and selections (state + inputs).
+     Used on menu change and workspace switch, so nothing picked earlier lingers. */
+  resetViewState(){
+    [TestCaseModule, BugReportModule, ActivityLogModule].forEach(m => {
+      m.ui.search = ''; m.ui.page = 1;
+      if ('activeFileId' in m.ui) m.ui.activeFileId = null;
+      if (m.ui.selected) m.ui.selected.clear();
+      m.ui.filters = Object.fromEntries(Object.keys(m.ui.filters).map(k => [k, '']));
+    });
+    Summary.filters = { fileId:'', module:'', tester:'', dateFrom:'', dateTo:'' };
+    ReportModule.filters = { fileId: '', module: '' };
+    ReportModule.open = null;
+    document.querySelectorAll('#globalSearch, #tcSearchInput, #bugSearchInput, #alSearchInput, #sumDateFrom, #sumDateTo')
+      .forEach(el => { el.value = ''; });
+    document.querySelectorAll('[id^="tcFilter"], [id^="bugFilter"], [id^="sumFilter"], [id^="alFilter"]').forEach(el => {
+      if (el.tagName !== 'SELECT') return;
+      el.value = '';
+      el.dispatchEvent(new Event('sync')); // searchable dropdown label (utils.searchableSelect)
+    });
+  },
   /* Active workspace switched in-app (workspace.js): drop anything that belonged
      to the previous workspace — open file, search, filters, selections — then
      recompute every workspace-scoped view. */
   onWorkspaceChanged(){
-    [TestCaseModule, BugReportModule].forEach(m => {
-      m.ui.activeFileId = null; m.ui.search = ''; m.ui.page = 1; m.ui.selected.clear();
-    });
-    Summary.filters.fileId = '';
-    ReportModule.filters = { fileId: '', module: '' }; // modules/rounds belong to the old workspace
-    ReportModule.open = null;
-    const gs = document.getElementById('globalSearch');
-    if (gs) gs.value = '';
+    this.resetViewState();
     this.renderSidebarCounts();
     NotificationCenter.renderBadge();
     WorkspacePicker.renderSwitcher();

@@ -766,6 +766,8 @@ const TestCaseModule = {
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
     if (!Auth.can('testcase_create') || !Auth.can('testcase_import')) return;
+    // Rows go into the open file — without one they'd be orphaned (invisible in every file list).
+    if (!this.ui.activeFileId){ Toast.show('Buka salah satu file test case dulu, lalu import dari sana.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = async (e) => {
       let sheets;
@@ -908,7 +910,7 @@ const TestCaseModule = {
     });
 
     const buf = await wb.xlsx.writeBuffer();
-    downloadBlob(buf, `TestCases_${todayISO()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    downloadBlob(buf, exportFileName('TestCase', this.ui.activeFileId, 'xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke Excel`);
     Toast.show('Export Excel Test Case berhasil.', 'success');
   },
@@ -916,7 +918,7 @@ const TestCaseModule = {
     if (!Auth.can('testcase_export')) return;
     const cols = [{ key:'no', label:'No' }, ...this.exportColumns()];
     const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1, code: tcCode(t) }));
-    downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');
+    downloadBlob(arrayToCSV(rows, cols), exportFileName('TestCase', this.ui.activeFileId, 'csv'), 'text/csv');
     ActivityLog.record('testcase_export', `${rows.length} test case di-export ke CSV`);
     Toast.show('Export CSV Test Case berhasil (siap import ke Google Spreadsheet).', 'success');
   },

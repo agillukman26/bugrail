@@ -905,7 +905,7 @@
       <div class="field readonly"><label>Tester</label><input name="tester" readonly></div>
       <div class="field" data-field="title">
         <label>Bug Title <span class="req">*</span></label>
-        <input name="title" maxlength="150" autocomplete="off">
+        <input name="title" maxlength="225" autocomplete="off">
         <div class="bug-similar" id="bugSimilarInfo" hidden></div>
       </div>
 
@@ -1084,15 +1084,15 @@
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
 
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=57"></script>
-<script src="js/app.js?v=45"></script>
+<script src="js/utils.js?v=60"></script>
+<script src="js/app.js?v=46"></script>
 <script src="js/activitylog.js?v=9"></script>
 <script src="js/workspace.js?v=5"></script>
 <script src="js/auth.js?v=30"></script>
 <script src="js/dashboard.js?v=20"></script>
-<script src="js/testcase.js?v=64"></script>
+<script src="js/testcase.js?v=66"></script>
 <script src="js/testforge.js?v=4"></script>
-<script src="js/bugreport.js?v=84"></script>
+<script src="js/bugreport.js?v=92"></script>
 <script src="js/summary.js?v=23"></script>
 <script src="js/report.js?v=28"></script>
 <script src="js/notifications.js?v=10"></script>
@@ -1117,8 +1117,7 @@
   document.getElementById('tcExportCsvBtn').addEventListener('click', () => TestCaseModule.exportCSV());
   document.getElementById('bugAddBtn').addEventListener('click', () => BugReportModule.openForm());
   document.getElementById('bugEmptyAddBtn').addEventListener('click', () => BugReportModule.openForm());
-  document.getElementById('bugExportExcelBtn').addEventListener('click', () => BugReportModule.exportExcel());
-  document.getElementById('bugExportCsvBtn').addEventListener('click', () => BugReportModule.exportCSV());
+  // Bug Report export buttons are bound in bugreport.js (binding here too downloaded every export twice).
   document.getElementById('globalFab')?.addEventListener('click', () => {
     document.getElementById('fabWrap').classList.toggle('open');
   });
