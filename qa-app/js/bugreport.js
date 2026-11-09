@@ -30,8 +30,9 @@ const BugReportModule = {
   isDraft(b){ return !!b && b.status === this.DRAFT; },
   reported(){ return this.all().filter(b => !this.isDraft(b)); },
   // No toast: the bell keeps reminding the tester until the draft is finished.
+  AUTO_DRAFT: false, // paused: a Failed test case no longer makes a draft bug ("Create Bug" stays manual). true = back on.
   draftFromTestCases(tcs){
-    if (!Auth.can('bugreport_create')) return;
+    if (!this.AUTO_DRAFT || !Auth.can('bugreport_create')) return;
     const fresh = tcs.filter(t => t && t.status === 'Failed' && !App.state.bugs.some(b => b.testCaseId === t.id));
     fresh.forEach(t => App.state.bugs.push({
       id: IdGen.uid('BUG'), code: this.nextCode(t.fileId), testCaseId: t.id, fileId: t.fileId,
@@ -1179,7 +1180,7 @@ const BugReportModule = {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Bug Reports');
-    XLSX.writeFile(wb, `BugReports_${todayISO()}.xlsx`);
+    XLSX.writeFile(wb, exportFileName('BugReport', this.ui.activeFileId, 'xlsx'));
     ActivityLog.record('bugreport_export', `${rows.length} bug di-export ke Excel`);
     Toast.show('Export Excel Bug Report berhasil.', 'success');
   },
@@ -1195,7 +1196,7 @@ const BugReportModule = {
       {key:'environment',label:'Environment'},{key:'platform',label:'Platform'},{key:'browser',label:'Browser'},{key:'os',label:'OS'},{key:'device',label:'Device'},
       {key:'attachments',label:'Attachment'},{key:'buildVersion',label:'Build Version'}
     ];
-    downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b), testCaseId: this.tcLabel(b.testCaseId) })), cols), `BugReports_${todayISO()}.csv`, 'text/csv');
+    downloadBlob(arrayToCSV(this.filtered().map(b => ({ ...b, code: bugCode(b), testCaseId: this.tcLabel(b.testCaseId) })), cols), exportFileName('BugReport', this.ui.activeFileId, 'csv'), 'text/csv');
     ActivityLog.record('bugreport_export', `${this.filtered().length} bug di-export ke CSV`);
     Toast.show('Export CSV Bug Report berhasil (siap import ke Google Spreadsheet).', 'success');
   },
@@ -1204,7 +1205,8 @@ const BugReportModule = {
   importFile(file){
     if (!Auth.can('bugreport_create') || !Auth.can('bugreport_import')) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
+      const backup = App.state.bugs.map(b => ({ ...b })); // undo half-done rows if anything throws
       try{
         const wb = XLSX.read(e.target.result, { type: 'array' });
         // Read every sheet (same as Test Case import). A row with an empty Module
@@ -1226,22 +1228,37 @@ const BugReportModule = {
             const r = {};
             Object.keys(raw).forEach(k => { r[k.replace(/\s*\*\s*$/, '').trim()] = typeof raw[k] === 'string' ? raw[k].trim() : raw[k]; });
             const tcRef = String(r['Test Case ID'] || r.testCaseId || '').trim();
-            const testCaseId = this.tcIdFromCode(tcRef);
+            const norm = v => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+            let testCaseId = this.tcIdFromCode(tcRef);
+            /* Test Case ID from another environment / workspace (numbers are re-made on import):
+               link the test case in this file with the same Module + Scenario instead — Failed and
+               not yet linked to a bug first, so repeated scenarios go to one test case each. */
+            const found = testCaseId && App.state.testcases.find(t => t.id === testCaseId);
+            if (!found || fileWorkspace(found.fileId) !== fileWorkspace(this.ui.activeFileId)){
+              const mod = norm(r.Module || r.module || sheetModule), scen = norm(r.Scenario || r.scenario);
+              const linked = t => App.state.bugs.some(b => b.testCaseId === t.id && !this.isDraft(b)) ? 1 : 0;
+              const byText = scen && App.state.testcases
+                .filter(t => t.fileId === this.ui.activeFileId && norm(t.module) === mod && norm(t.scenario) === scen)
+                .sort((a, b) => linked(a) - linked(b) || (a.status === 'Failed' ? 0 : 1) - (b.status === 'Failed' ? 0 : 1))[0];
+              if (byText) testCaseId = byText.id;
+            }
             if (tcRef && !testCaseId) unknownTc.add(tcRef);
             const tc = testCaseId ? App.state.testcases.find(t => t.id === testCaseId) : null; // same auto-fill as the form
             const title = r['Bug Title'] || r.title;
             // Blank Actual Result: take the one written when the test case was run.
             const actualResult = r['Actual Result'] || r.actualResult || (tc && tc.actualResult) || '';
-            if (!title || !actualResult){
+            // Server rule (validateBugsWrite): one over-long title rejects the whole save.
+            const longTitle = String(title || '').trim().length > 225;
+            if (!title || !actualResult || longTitle){
               const fields = [!title && 'Bug Title', !actualResult && 'Actual Result'].filter(Boolean);
-              skipped.push({ sheet: sheetName, row: raw.__rowNum__ + 1, fields }); // __rowNum__ = SheetJS 0-based row
+              skipped.push({ sheet: sheetName, row: raw.__rowNum__ + 1, fields, long: longTitle }); // __rowNum__ = SheetJS 0-based row
               return;
             }
             // Text identical to the test case (pre-filled template) counts as "from the test case".
-            const same = (v, src) => tc && String(v || '').trim() === String(src || '').trim();
+            const sameAsTc = (v, src) => tc && String(v || '').trim() === String(src || '').trim();
             let ownSteps = r['Test Steps'] || r.steps, ownExpected = r['Expected Result'] || r.expectedResult;
-            if (same(ownSteps, stepsHtmlToText(tc ? tc.steps || '' : ''))) ownSteps = '';
-            if (same(ownExpected, tc && tc.expectedResult)) ownExpected = '';
+            if (sameAsTc(ownSteps, stepsHtmlToText(tc ? tc.steps || '' : ''))) ownSteps = '';
+            if (sameAsTc(ownExpected, tc && tc.expectedResult)) ownExpected = '';
             const statuses = this.STATUS;
             const status = statuses.includes(r.Status || r.status) ? (r.Status || r.status) : (statuses[0] || 'Open');
             const bug = {
@@ -1268,15 +1285,37 @@ const BugReportModule = {
             seen.add(key);
             Auth.logAssignment(bug, '', bug.assignee); // assignee gets the bell notification
             // The test case already has an auto draft (Entry): fill that one instead of a second bug.
-            const draft = testCaseId && App.state.bugs.find(b => b.testCaseId === testCaseId && this.isDraft(b));
-            if (draft){ Object.assign(draft, { ...bug, id: draft.id, code: draft.code, fileId: draft.fileId }); count++; return; }
+            // Test Case ID from another environment / numbering doesn't resolve: match the draft
+            // in this file by Module + Scenario instead (each fill turns it Open, so repeats take the next one).
+            const draft = App.state.bugs.find(b => this.isDraft(b) && (testCaseId
+              ? b.testCaseId === testCaseId
+              : b.fileId === this.ui.activeFileId && norm(b.module) === norm(bug.module) && norm(b.scenario) === norm(bug.scenario)));
+            if (draft){
+              // Only what the sheet actually has overwrites the draft; its test case link and copied steps stay.
+              Object.keys(bug).forEach(k => {
+                if (['id', 'code', 'fileId'].includes(k) || bug[k] === '' || bug[k] == null || bug[k] === false) return;
+                draft[k] = bug[k];
+              });
+              if (!testCaseId) unknownTc.delete(tcRef);
+              count++; return;
+            }
             App.state.bugs.push(bug);
             count++;
           });
           if (count > before) sheetsUsed++;
         });
         App.ensureDefaultFile();
-        App.saveBugs();
+        const saved = await App.saveBugs();
+        // Refused by the server (4xx): nothing was stored — drop the rows here too, or they'd
+        // show until the next refresh (e.g. a workspace switch) and then vanish.
+        if (!saved && !Storage.offlineBoot && !Storage.unsynced().includes(STORAGE_KEYS.BUGS)){
+          App.state.bugs = backup;
+          Storage.cache[STORAGE_KEYS.BUGS] = backup;
+          try{ localStorage.setItem(STORAGE_KEYS.BUGS, JSON.stringify(backup)); }catch(err){}
+          this.render();
+          listDialog('Import gagal disimpan', [Storage.lastError[STORAGE_KEYS.BUGS] || 'Ditolak server.'], 'Tidak ada data yang di-import. Perbaiki baris tersebut lalu import ulang.');
+          return;
+        }
         ActivityLog.record('bugreport_create', `${count} bug report di-import dari ${sheetsUsed} sheet${same ? `, ${same} data sama di-skip` : ''}${skipped.length ? `, ${skipped.length} gagal` : ''}`);
         this.render();
         const unknownMsg = `Test Case ID tidak ditemukan (bug tetap di-import tanpa link): ${[...unknownTc].slice(0, 5).join(', ')}${unknownTc.size > 5 ? ` +${unknownTc.size - 5}` : ''}`;
@@ -1284,16 +1323,21 @@ const BugReportModule = {
         // else one line per module, or one line if nothing was imported.
         const join = list => [...new Set(list)].join(' & ');
         const bySheet = {};
-        skipped.forEach(s => (bySheet[s.sheet] = bySheet[s.sheet] || []).push(...s.fields));
+        const LONG = 'Bug Title lebih dari 225 karakter';
+        const why = list => [list.some(f => f !== LONG) && `${join(list.filter(f => f !== LONG))} belum diisi`,
+          list.includes(LONG) && LONG].filter(Boolean).join(', ');
+        const reasons = s => [...s.fields, ...(s.long ? [LONG] : [])];
+        skipped.forEach(s => (bySheet[s.sheet] = bySheet[s.sheet] || []).push(...reasons(s)));
         const items = skipped.length <= 5
-          ? skipped.map(s => `${s.sheet} baris ${s.row}: ${join(s.fields)} belum diisi`)
-          : !count ? [`Semua module: ${join(skipped.flatMap(s => s.fields))} belum diisi`]
-          : Object.entries(bySheet).map(([sheet, f]) => `${sheet}: ${join(f)} belum diisi`);
+          ? skipped.map(s => `${s.sheet} baris ${s.row}: ${why(reasons(s))}`)
+          : !count ? [`Semua module: ${why(skipped.flatMap(reasons))}`]
+          : Object.entries(bySheet).map(([sheet, f]) => `${sheet}: ${why(f)}`);
         if (unknownTc.size) items.push(unknownMsg);
         importResultDialog({ same, added: count, failed: skipped.length, errors: items });
       }catch(err){
         console.error(err);
-        listDialog('Gagal membaca file', [], 'Pastikan format sesuai template.');
+        App.state.bugs = backup;
+        listDialog('Gagal membaca file', [String(err && err.message || err)], 'Pastikan format sesuai template. Tidak ada data yang di-import.');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1342,7 +1386,7 @@ const BugReportModule = {
        filled from the test case — the tester only types the Bug Title (yellow).
        Rows left without a title are skipped on import. */
     const failed = this.ui.activeFileId
-      ? App.state.testcases.filter(t => t.fileId === this.ui.activeFileId && t.status === 'Failed' && !App.state.bugs.some(b => b.testCaseId === t.id))
+      ? App.state.testcases.filter(t => t.fileId === this.ui.activeFileId && t.status === 'Failed' && !App.state.bugs.some(b => b.testCaseId === t.id && !this.isDraft(b))) // still a draft: list it so the import fills it
       : [];
     // Failed-test-case template: steps / expected / tester / status come from the
     // test case and the importer on import, so only what a tester checks or types stays.

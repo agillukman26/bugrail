@@ -313,7 +313,7 @@ async function validateBugsWrite(req, res, next){
     for (const b of added){
       if (b.status === 'Entry') continue; // auto draft from a Failed test case: tester fills title later
       const title = text(b.title).length;
-      if (!title || title > 150) return res.status(400).json({ error: `Bug Title wajib diisi (maks. 150 karakter): ${b.code || b.id}` });
+      if (!title || title > 225) return res.status(400).json({ error: `Bug Title wajib diisi (maks. 225 karakter): ${b.code || b.id}` });
       if (!text(b.actualResult)) return res.status(400).json({ error: `Actual Result wajib diisi: ${b.code || b.id}` });
     }
     if (role === 'admin') return next();
@@ -533,7 +533,7 @@ app.post('/api/bug/analyze', async (req, res) => {
     if (!parsed || typeof parsed !== 'object') return res.status(502).json({ error: 'AI response JSON parse failed' });
     const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
     res.json({
-      title: str(parsed.title, 150),
+      title: str(parsed.title, 225),
       severity: BUG_SEVERITIES.includes(parsed.severity) ? parsed.severity : '',
       priority: BUG_PRIORITIES.includes(parsed.priority) ? parsed.priority : '',
       analysis: str(parsed.analysis, 2000)

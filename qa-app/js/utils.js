@@ -83,6 +83,7 @@ const Storage = {
   base: {},
   chain: {},    // per-key promise chain: one PUT per key at a time (each carries the rev the previous one got)
   onMerged: null, // set by App: called after a key was merged with newer server data
+  lastError: {}, // key -> server message of the last refused PUT (shown by callers)
 
   // Takes the server's data (+ _revs) as the new synced state.
   adopt(data){
@@ -284,6 +285,7 @@ const Storage = {
       if (res.status >= 400 && res.status < 500){
         // Rejected (no permission / stale and unmergeable) — retrying as-is won't help.
         if (this.seq[key] === mySeq) this.markUnsynced(key, false);
+        this.lastError[key] = body.error || `ditolak server (HTTP ${res.status})`;
         Toast.show(`Gagal menyimpan: ${body.error || `ditolak server (HTTP ${res.status})`}`, 'error');
         return false;
       }
@@ -433,7 +435,7 @@ const BUG_FORM = {
     const e = {};
     const len = v => String(v || '').trim().length;
     const title = len(d.title);
-    if (title < 5 || title > 150) e.title = 'Bug Title wajib diisi, 5–150 karakter.';
+    if (title < 5 || title > 225) e.title = 'Bug Title wajib diisi, 5–225 karakter.';
     if (len(d.actualResult) < 5) e.actualResult = 'Actual Result wajib diisi, minimal 5 karakter.';
     if (len(d.description) > 2000) e.description = 'Maksimal 2000 karakter.';
     const bad = String(d.attachments || '').split('\n').map(s => s.trim()).filter(Boolean).find(l => {
@@ -801,6 +803,7 @@ function searchableSelect(select, placeholder = 'Cari...'){
   // Options are rebuilt on every render (and reset sets .value): keep the label current.
   new MutationObserver(sync).observe(select, { childList: true });
   select.addEventListener('change', sync);
+  select.addEventListener('sync', sync); // programmatic reset without firing the page's change handler
   sync();
   return { sync };
 }
@@ -1269,6 +1272,16 @@ function formatDateTime(iso){
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 
 function nowISO(){ return new Date().toISOString(); }
+
+/* Export file name: <Workspace>_<File>_<kind>_<date>.<ext>. Workspace comes from the open
+   file (else the active workspace); no open file (search across files / Export page) = "Semua File". */
+function exportFileName(kind, fileId, ext){
+  const file = fileId && (App.state.files || []).find(f => f.id === fileId);
+  const wsId = (file && file.workspaceId) || WorkspacePicker.activeRaw();
+  const clean = v => String(v || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+  return [clean(wsId ? WorkspacePicker.nameOf(wsId) : ''), clean(file ? file.name : 'Semua File'), kind, todayISO()]
+    .filter(Boolean).join('_') + '.' + ext;
+}
 
 function downloadBlob(content, filename, mime){
   const blob = new Blob([content], { type: mime });
