@@ -58,6 +58,15 @@ const Storage = {
     const keys = new Set(this.unsynced());
     if (on) keys.add(key); else keys.delete(key);
     try{ localStorage.setItem(this.UNSYNCED_KEY, JSON.stringify([...keys])); }catch(e){}
+    if (on) this.saveBase(key); else try{ localStorage.removeItem(key + this.BASE_SUFFIX); }catch(e){}
+  },
+  /* The server copy a pending change was made on, kept next to it: after a reload hydrate()
+     needs it to tell which rows this browser really edited. Without it every stale row
+     looked edited and overwrote newer server data (test case runs reverted to Open). */
+  BASE_SUFFIX: '__base',
+  saveBase(key){
+    if (this.base[key] === undefined) return;
+    try{ localStorage.setItem(key + this.BASE_SUFFIX, this.base[key]); }catch(e){}
   },
   hasUnsynced(){ return this.inflight > 0 || this.unsynced().length > 0; },
   // Resolves once every PUT in flight has been answered (or after maxMs).
@@ -127,10 +136,17 @@ const Storage = {
     pending.forEach(key => {
       try{
         const raw = localStorage.getItem(key);
-        // Unknown ancestor (saved in an earlier session): keep everything the server
-        // has and lay this browser's added/edited rows on top. Never re-send the old
-        // copy whole — that is exactly how other people's changes got wiped.
-        if (raw) this.cache[key] = KvMerge.merge(undefined, JSON.parse(raw), this.cache[key]) ?? this.cache[key];
+        if (!raw) return;
+        // 3-way merge against the server copy the change was made on: only rows this
+        // browser edited/added win. Never re-send the old copy whole — that is exactly
+        // how other people's changes got wiped.
+        const savedBase = localStorage.getItem(key + this.BASE_SUFFIX);
+        const mine = JSON.parse(raw), theirs = this.cache[key];
+        this.cache[key] = (savedBase !== null
+          ? KvMerge.merge(JSON.parse(savedBase), mine, theirs)
+          : KvMerge.keepTheirs(mine, theirs)) ?? theirs;
+        this.base[key] = JSON.stringify(theirs);
+        this.saveBase(key);
       }catch(err){ console.error('Storage.hydrate: bad unsynced value', key, err); }
     });
     // Passwords must not linger in the browser: the server checks them now. newPassword stays:
@@ -292,6 +308,7 @@ const Storage = {
       this.cache[key] = merged;
       this.revs[key] = rev;
       this.base[key] = JSON.stringify(value);
+      this.saveBase(key);
       try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
       if (this.onMerged) this.onMerged(key);
       return true;
@@ -340,6 +357,16 @@ const KvMerge = {
     // My new rows. A row they deleted stays deleted unless I edited it.
     mine.forEach(m => { if (!T.has(m.id) && (!B.has(m.id) || B.get(m.id) !== JSON.stringify(m))) out.push(m); });
     return out;
+  },
+  /* No known ancestor (pending copy saved before bases were kept). Rows (test cases, bugs...):
+     the server wins on every row it has; only rows it never saw are added. Objects (settings)
+     keep the old per-key merge, so a pending password change still goes through. */
+  keepTheirs(mine, theirs){
+    if (Array.isArray(mine) && Array.isArray(theirs)){
+      const ids = new Set(theirs.map(r => r && r.id));
+      return [...theirs, ...mine.filter(r => r && r.id != null && !ids.has(r.id))];
+    }
+    return this.merge(undefined, mine, theirs);
   }
 };
 
@@ -383,6 +410,7 @@ const BUG_FORM = {
      moves it automatically. Unknown/empty priority counts as Medium.
      Returns ISO string, '' without reportDate. */
   dueDate(bug){
+    if (bug && bug.status === 'Entry') return ''; // draft bug: SLA starts once it's reported
     if (bug && /^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
     if (bug && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(bug.dueDate || '')) return new Date(bug.dueDate).toISOString();
     if (!bug || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';
@@ -960,8 +988,11 @@ function fileCreateDialog(workspaces){
    rendered when `canShare` is true — otherwise sharedWith passes through
    unchanged (rename-only, e.g. a workspace member editing their own file
    without share permission, or a legacy/shared file with no single owner). */
+/* Admin also picks the owning workspace: '' = Semua workspace (visible to everyone),
+   or move the file — and its test cases / bugs — into one workspace. */
 function fileEditDialog(file, canShare, workspaces){
   return new Promise(resolve => {
+    const canMove = Auth.isAdmin();
     const shared = new Set(file.sharedWith || []);
     const others = canShare ? workspaces.filter(w => w.id !== file.workspaceId) : [];
     const overlay = document.createElement('div');
@@ -974,6 +1005,14 @@ function fileEditDialog(file, canShare, workspaces){
           <input type="text" id="fileEditName" value="${escapeHtml(file.name)}">
           <p class="combobox-error" id="fileEditError" style="display:none;"></p>
         </div>
+        ${canMove ? `
+        <div class="field">
+          <label>Workspace Pemilik</label>
+          <select id="fileEditWorkspace">
+            <option value="">Semua workspace</option>
+            ${workspaces.map(w => `<option value="${escapeHtml(w.id)}" ${w.id === file.workspaceId ? 'selected' : ''}>${escapeHtml(w.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}
         ${canShare ? `
         <div class="field" style="margin-bottom:0;">
           <label>Share ke Workspace</label>
@@ -1003,7 +1042,8 @@ function fileEditDialog(file, canShare, workspaces){
       const sharedWith = canShare
         ? [...overlay.querySelectorAll('[data-share-id]:checked')].map(el => el.dataset.shareId)
         : (file.sharedWith || []);
-      close({ name, sharedWith });
+      const workspaceId = canMove ? (overlay.querySelector('#fileEditWorkspace').value || null) : (file.workspaceId || null);
+      close({ name, sharedWith: sharedWith.filter(id => id !== workspaceId), workspaceId });
     };
     bindBackdropClose(overlay, () => close(null));
   });

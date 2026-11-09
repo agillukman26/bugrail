@@ -80,9 +80,12 @@ const TestCaseModule = {
     if (!result) return;
     const oldName = file.name;
     const oldShared = (file.sharedWith || []).slice().sort();
+    const oldWs = file.workspaceId || null;
     file.name = result.name;
-    if (canShare) file.sharedWith = result.sharedWith;
+    if (canShare || result.workspaceId !== oldWs) file.sharedWith = result.sharedWith;
+    file.workspaceId = result.workspaceId;
     App.saveFiles();
+    if (oldWs !== file.workspaceId) ActivityLog.record('tc_file_move', `File Test Case "${file.name}" dipindah dari ${WorkspacePicker.nameOf(oldWs || WorkspaceCalc.ALL)} ke ${WorkspacePicker.nameOf(file.workspaceId || WorkspaceCalc.ALL)}`);
     if (oldName !== file.name) ActivityLog.record('tc_file_rename', `File Test Case "${oldName}" diganti nama jadi "${file.name}"`);
     const newShared = (file.sharedWith || []).slice().sort();
     if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
@@ -174,8 +177,12 @@ const TestCaseModule = {
     const canCreateBug = Auth.can('bugreport_create');
     document.getElementById('tcAddBtn').style.display = canCreate ? '' : 'none';
     document.getElementById('tcEmptyAddBtn').style.display = canCreate ? '' : 'none';
-    document.getElementById('tcImportBtn').style.display = canCreate ? '' : 'none';
-    document.getElementById('tcImportTemplateMenuBtn').style.display = canCreate ? '' : 'none';
+    const canImport = canCreate && Auth.can('testcase_import'), canExport = Auth.can('testcase_export');
+    document.getElementById('tcImportBtn').style.display = canImport ? '' : 'none';
+    document.getElementById('tcImportTemplateMenuBtn').style.display = canImport ? '' : 'none';
+    document.getElementById('tcExportExcelBtn').style.display = canExport ? '' : 'none';
+    document.getElementById('tcExportCsvBtn').style.display = canExport ? '' : 'none';
+    document.getElementById('tcExportDropdown').style.display = canImport || canExport ? '' : 'none';
 
     const body = document.getElementById('tcTableBody');
     const bulkBar = document.getElementById('tcBulkBar');
@@ -584,20 +591,25 @@ const TestCaseModule = {
     if (data.status !== 'Open' && !data.evidence){
       Toast.show('Evidence wajib diisi untuk test case berstatus selain Open.', 'error'); f.evidence.focus(); return;
     }
+    const newlyFailed = [];
     if (this.ui.editingId){
       const idx = App.state.testcases.findIndex(t => t.id === this.ui.editingId);
       if (data.status !== App.state.testcases[idx].status && data.status !== 'Open') data.lastRunAt = nowISO();
+      if (data.status === 'Failed' && App.state.testcases[idx].status !== 'Failed') newlyFailed.push(this.ui.editingId);
+      const evidence = { from: App.state.testcases[idx].evidence || '', to: data.evidence };
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
-      ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`);
+      ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`, evidence);
       Toast.show(`Test case ${tcCode(App.state.testcases[idx])} diperbarui.`, 'success');
     } else {
       if (data.status !== 'Open') data.lastRunAt = nowISO();
       const tc = { id: IdGen.uid('TC'), code: this.nextCode(data.module, this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO() };
       App.state.testcases.push(tc);
+      if (tc.status === 'Failed') newlyFailed.push(tc.id);
       ActivityLog.record('testcase_create', `Test Case ${tc.code} dibuat`);
       Toast.show(`Test case ${tc.code} dibuat.`, 'success');
     }
     App.saveTestcases();
+    BugReportModule.draftFromTestCases(App.state.testcases.filter(t => newlyFailed.includes(t.id)));
     this.closeForm();
     // New row: open the table page it landed on (stored order puts it last).
     if (!this.ui.editingId){
@@ -666,6 +678,7 @@ const TestCaseModule = {
     if (!f.evidence.value.trim()){ Toast.show('Evidence wajib diisi.', 'error'); f.evidence.focus(); return; }
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
     const from = App.state.testcases[idx].status;
+    const evidence = { from: App.state.testcases[idx].evidence || '', to: f.evidence.value.trim() };
     const id = tcCode(App.state.testcases[idx]);
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].evidence = f.evidence.value.trim();
@@ -673,13 +686,12 @@ const TestCaseModule = {
     App.state.testcases[idx].executionDate = todayISO();
     App.state.testcases[idx].lastRunAt = nowISO();
     App.saveTestcases();
-    if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`);
+    if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`, evidence);
+    else if (evidence.from !== evidence.to) ActivityLog.record('testcase_update', `Test Case ${id} evidence diubah (Run)`, evidence);
     this.closeExecute();
     this.render();
+    if (from !== 'Failed') BugReportModule.draftFromTestCases([App.state.testcases[idx]]);
     Toast.show('Hasil eksekusi test case berhasil disimpan.', 'success');
-    // Newly failed: open a bug draft (AI-analysed) straight away.
-    // Paused for now — uncomment to turn back on. "🐞 Create Bug" still opens the bug form (AI draft paused too).
-    // if (from !== 'Failed' && f.status.value === 'Failed' && Auth.can('bugreport_create')) this.createBugFromTestCase(this.ui.executingId);
   },
 
   duplicate(id){
@@ -727,14 +739,16 @@ const TestCaseModule = {
   bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status || !Auth.can('testcase_update')) return;
     let changed = 0, skipped = 0;
+    const moved = [];
     App.state.testcases.forEach(t => {
       if (!this.ui.selected.has(t.id) || t.status === status) return;
       // Same rule as the form: no evidence, can't leave Open.
       if (status !== 'Open' && !String(t.evidence || '').trim()){ skipped++; return; }
-      t.status = status; changed++;
+      t.status = status; changed++; moved.push(t);
       if (status !== 'Open') t.lastRunAt = nowISO();
     });
     App.saveTestcases();
+    BugReportModule.draftFromTestCases(moved);
     if (changed) ActivityLog.record('testcase_update', `${changed} test case status diubah menjadi ${status} (bulk)`);
     this.render();
     if (skipped) Toast.show(`${changed} test case diubah menjadi ${status}. ${skipped} dilewati karena Evidence kosong.`, changed ? 'info' : 'error');
@@ -744,12 +758,14 @@ const TestCaseModule = {
   /* ---- Integration: Test Case (Failed) -> Bug Report ---- */
   createBugFromTestCase(id){
     App.goTo('bugreport');
-    setTimeout(() => BugReportModule.openForm(null, id), 50);
+    // Auto-made draft for this test case: finish that one instead of a second bug.
+    const draft = App.state.bugs.find(b => b.testCaseId === id && BugReportModule.isDraft(b));
+    setTimeout(() => draft ? BugReportModule.openForm(draft.id) : BugReportModule.openForm(null, id), 50);
   },
 
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
-    if (!Auth.can('testcase_create')) return;
+    if (!Auth.can('testcase_create') || !Auth.can('testcase_import')) return;
     const reader = new FileReader();
     reader.onload = async (e) => {
       let sheets;
@@ -775,6 +791,7 @@ const TestCaseModule = {
       if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
       const result = { same: dup.length, added: rows.length, failed, errors: errorList };
       if (!rows.length){ importResultDialog(result); return; }
+      const added = [];
       rows.forEach(r => {
         // Always number imported rows fresh, in file order, per workspace — a
         // "Test Case ID" in the file (often from another workspace/export) is ignored.
@@ -785,10 +802,12 @@ const TestCaseModule = {
           actualResult: r.actualResult || '', evidence: r.evidence || '', status: r.status || 'Open', typeTest: r.typeTest || 'Positive',
           executionDate: '', customFields: {}, fileId: this.ui.activeFileId, createdBy: Auth.currentEmail() || '', createdAt: nowISO()
         });
+        added.push(App.state.testcases[App.state.testcases.length - 1]);
       });
       const sheetsUsed = sheets.filter(s => s.rows.length).length;
       App.ensureDefaultFile();
       App.saveTestcases();
+      BugReportModule.draftFromTestCases(added);
       ActivityLog.record('testcase_create', `${rows.length} test case di-import dari ${sheetsUsed} sheet${dup.length ? `, ${dup.length} data sama di-skip` : ''}${failed ? `, ${failed} gagal` : ''}`);
       this.render();
       importResultDialog(result);
@@ -870,6 +889,7 @@ const TestCaseModule = {
 
   /* One sheet per Module (respects current search/filter via this.filtered()). */
   async exportExcel(){
+    if (!Auth.can('testcase_export')) return;
     const cols = [{ key:'no', label:'No', width:6 }, ...this.exportColumns()];
     const rows = this.filtered().map(t => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), code: tcCode(t) }));
 
@@ -893,6 +913,7 @@ const TestCaseModule = {
     Toast.show('Export Excel Test Case berhasil.', 'success');
   },
   exportCSV(){
+    if (!Auth.can('testcase_export')) return;
     const cols = [{ key:'no', label:'No' }, ...this.exportColumns()];
     const rows = this.filtered().map((t, i) => ({ ...t, ...(t.customFields || {}), steps: stepsHtmlToText(t.steps || ''), no: i + 1, code: tcCode(t) }));
     downloadBlob(arrayToCSV(rows, cols), `TestCases_${todayISO()}.csv`, 'text/csv');

@@ -25,7 +25,7 @@ const Dashboard = {
 
   render(){
     const tcs = TestCaseModule.all();
-    const bugs = BugReportModule.all();
+    const bugs = BugReportModule.reported();
     const s = this.computeStats(tcs, bugs);
     const resStats = computeBugResolutionStats(bugs);
     const passRate = s.totalTC ? Math.round((s.passed/s.totalTC)*100) : 0;

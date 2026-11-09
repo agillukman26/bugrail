@@ -311,6 +311,7 @@ async function validateBugsWrite(req, res, next){
     if (!added.length) return next();
     const text = v => String(v == null ? '' : v).trim();
     for (const b of added){
+      if (b.status === 'Entry') continue; // auto draft from a Failed test case: tester fills title later
       const title = text(b.title).length;
       if (!title || title > 150) return res.status(400).json({ error: `Bug Title wajib diisi (maks. 150 karakter): ${b.code || b.id}` });
       if (!text(b.actualResult)) return res.status(400).json({ error: `Actual Result wajib diisi: ${b.code || b.id}` });

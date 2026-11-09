@@ -219,5 +219,32 @@ function makeEnv(server){
   assert.ok(MS.S.hasUnsynced(), 'old server on merge keeps the unsynced marker');
   assert.deepStrictEqual(ms.data.qa_testcases.map(t => t.id), ['S', 'T'], 'nothing written after the old server was seen');
 
+  // 15) Stale unsynced copy from an earlier session must not revert newer server rows.
+  //     Browser X saved row 2 + new row 3 while the server was down; meanwhile another
+  //     user ran row 1 (Open -> Failed). X reloads: row 1 stays Failed, X's edits land.
+  const sv = { up: true, putStatus: 200, data: { qa_testcases: [{ id: '1', status: 'Open' }, { id: '2', status: 'Open' }] } };
+  const X = makeEnv(sv);
+  await X.S.hydrate();
+  sv.up = false;
+  await X.S.set('qa_testcases', [{ id: '1', status: 'Open' }, { id: '2', status: 'Passed' }, { id: '3', status: 'Open' }]);
+  sv.up = true;
+  const other = makeEnv(sv);
+  await other.S.hydrate();
+  await other.S.set('qa_testcases', [{ id: '1', status: 'Failed' }, { id: '2', status: 'Open' }]);
+  const X2 = makeEnv(sv);
+  Object.assign(X2.ls, X.ls);
+  await X2.S.hydrate();
+  await X2.S.flushPending();
+  assert.strictEqual(JSON.stringify(sv.data.qa_testcases.map(t => t.status)), '["Failed","Passed","Open"]', "other user's run survives, X's edits land");
+  assert.strictEqual(X2.ls['qa_testcases__base'], undefined, 'base dropped once synced');
+
+  // 16) Legacy pending copy (no saved base): server wins on its rows, only new rows are added.
+  const lg = { up: true, putStatus: 200, data: { qa_testcases: [{ id: '1', status: 'Failed' }] } };
+  const LG = makeEnv(lg);
+  LG.ls.qa_testcases = JSON.stringify([{ id: '1', status: 'Open' }, { id: '9', status: 'Open' }]);
+  LG.ls.qa_unsynced_v2 = JSON.stringify(['qa_testcases']);
+  await LG.S.hydrate();
+  assert.strictEqual(JSON.stringify(LG.S.get('qa_testcases').map(t => t.id + t.status)), '["1Failed","9Open"]');
+
   console.log('storage.check.js: all checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

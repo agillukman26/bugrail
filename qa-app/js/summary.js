@@ -16,7 +16,7 @@ const Summary = {
     });
   },
   filteredBugs(){
-    return BugReportModule.all().filter(b => {
+    return BugReportModule.reported().filter(b => {
       if (this.filters.fileId && b.fileId !== this.filters.fileId) return false;
       if (this.filters.module && b.module !== this.filters.module) return false;
       if (this.filters.tester && b.tester !== this.filters.tester) return false;
@@ -30,7 +30,7 @@ const Summary = {
   /* Bug count per file, ignoring the file filter itself — lets you spot
      which file has the most bug reports regardless of which one is picked. */
   bugCountsByFile(){
-    const base = BugReportModule.all().filter(b => {
+    const base = BugReportModule.reported().filter(b => {
       if (this.filters.module && b.module !== this.filters.module) return false;
       if (this.filters.tester && b.tester !== this.filters.tester) return false;
       const reportDay = b.reportDate ? b.reportDate.slice(0,10) : '';
@@ -77,7 +77,7 @@ const Summary = {
         values.map(v => `<option value="${escapeHtml(v)}" ${v===current?'selected':''}>${escapeHtml(label(v))}</option>`).join('');
     };
     build('sumFilterModule', TestCaseModule.all(), 'module');
-    build('sumFilterTester', BugReportModule.all(), 'tester', userName);
+    build('sumFilterTester', BugReportModule.reported(), 'tester', userName);
 
     const fileEl = document.getElementById('sumFilterFile');
     const curFile = this.filters.fileId;

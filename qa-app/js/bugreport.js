@@ -23,6 +23,28 @@ const BugReportModule = {
   get STATUS(){
     return this.statusMaster().slice().sort((a, b) => a.order - b.order).map(s => s.name);
   },
+  /* Test case turns Failed -> a draft bug is made for it. It waits in the list (not on the
+     board, not in reports) until the tester fills title / severity / assignee and saves it;
+     then it starts at the first status (Open). */
+  DRAFT: 'Entry',
+  isDraft(b){ return !!b && b.status === this.DRAFT; },
+  reported(){ return this.all().filter(b => !this.isDraft(b)); },
+  // No toast: the bell keeps reminding the tester until the draft is finished.
+  draftFromTestCases(tcs){
+    if (!Auth.can('bugreport_create')) return;
+    const fresh = tcs.filter(t => t && t.status === 'Failed' && !App.state.bugs.some(b => b.testCaseId === t.id));
+    fresh.forEach(t => App.state.bugs.push({
+      id: IdGen.uid('BUG'), code: this.nextCode(t.fileId), testCaseId: t.id, fileId: t.fileId,
+      module: t.module || '', scenario: t.scenario || '', preconditions: t.preconditions || '', testData: t.testData || '',
+      steps: t.steps || '', expectedResult: t.expectedResult || '', useTcSteps: true, useTcExpected: true,
+      actualResult: t.actualResult || '', tester: Auth.currentEmail() || '',
+      title: '', description: '', severity: '', priority: '', dueDate: '', assignee: '', attachments: '',
+      status: this.DRAFT, reportDate: nowISO()
+    }));
+    if (!fresh.length) return;
+    App.saveBugs();
+    ActivityLog.record('bugreport_create', `${fresh.length} draft bug dibuat otomatis dari test case Failed`);
+  },
 
   ui: {
     search: '', filters: { module:'', severity:'', priority:'', status:'', tester:'' },
@@ -79,9 +101,12 @@ const BugReportModule = {
     if (!result) return;
     const oldName = file.name;
     const oldShared = (file.sharedWith || []).slice().sort();
+    const oldWs = file.workspaceId || null;
     file.name = result.name;
-    if (canShare) file.sharedWith = result.sharedWith;
+    if (canShare || result.workspaceId !== oldWs) file.sharedWith = result.sharedWith;
+    file.workspaceId = result.workspaceId;
     App.saveFiles();
+    if (oldWs !== file.workspaceId) ActivityLog.record('bug_file_move', `File Bug Report "${file.name}" dipindah dari ${WorkspacePicker.nameOf(oldWs || WorkspaceCalc.ALL)} ke ${WorkspacePicker.nameOf(file.workspaceId || WorkspaceCalc.ALL)}`);
     if (oldName !== file.name) ActivityLog.record('bug_file_rename', `File Bug Report "${oldName}" diganti nama jadi "${file.name}"`);
     const newShared = (file.sharedWith || []).slice().sort();
     if (canShare && JSON.stringify(oldShared) !== JSON.stringify(newShared)){
@@ -158,6 +183,10 @@ const BugReportModule = {
       : `${this.filtered().length} hasil ditemukan`;
 
     document.getElementById('bugAddBtn').style.display = Auth.can('bugreport_create') ? '' : 'none';
+    const canImport = Auth.can('bugreport_create') && Auth.can('bugreport_import'), canExport = Auth.can('bugreport_export');
+    ['bugImportBtn', 'bugImportTemplateBtn'].forEach(id => { document.getElementById(id).style.display = canImport ? '' : 'none'; });
+    ['bugExportExcelBtn', 'bugExportCsvBtn'].forEach(id => { document.getElementById(id).style.display = canExport ? '' : 'none'; });
+    document.getElementById('bugExportDropdown').style.display = canImport || canExport ? '' : 'none';
     document.getElementById('bugViewToggle').querySelector('[data-view="board"]').style.display = Auth.can('bugreport_board') ? '' : 'none';
     if (!Auth.can('bugreport_board') && this.ui.view === 'board') this.ui.view = 'table';
 
@@ -188,7 +217,7 @@ const BugReportModule = {
       return;
     }
 
-    const canEdit = Auth.can('bugreport_update') || Auth.can('bugreport_updateStatusPriority');
+    const canEdit = Auth.can('bugreport_update') || Auth.can('bugreport_updateStatusPriority') || Auth.can('bugreport_priority');
     const canDelete = Auth.can('bugreport_delete');
 
     const bulkBar = document.getElementById('bugBulkBar');
@@ -201,7 +230,7 @@ const BugReportModule = {
         <td><input type="checkbox" class="checkbox bug-row-check" data-id="${b.id}" ${this.ui.selected.has(b.id)?'checked':''}></td>
         <td class="mono">${this.bugKeyLink(b)}</td>
         <td class="mono text-dim">${escapeHtml(this.tcLabel(b.testCaseId) || '-')}</td>
-        <td class="truncate" title="${escapeHtml(b.title)}">${escapeHtml(b.title)}</td>
+        <td class="truncate" title="${escapeHtml(b.title)}">${b.title ? escapeHtml(b.title) : '<span class="text-faint">(draft — isi judul)</span>'}</td>
         <td class="truncate" title="${escapeHtml(b.module)}">${escapeHtml(b.module)}</td>
         <td>${this.severityBadge(b.severity)}</td>
         <td>${this.statusBadge(b.status)}</td>
@@ -358,10 +387,14 @@ const BugReportModule = {
       if (!App.state.bugs.every(o => o.testCaseId !== tc.id || done.has(this.statusCode(o.status)))) return;
       const from = tc.status;
       tc.status = 'Passed';
+      // Proof of the fix: attachment given when the bug was moved to Resolved (old evidence kept if none).
+      const fix = (b.activity || []).filter(x => x.to === b.status && x.attachment).pop();
+      const evidence = { from: tc.evidence || '', to: fix ? fix.attachment : tc.evidence || '' };
+      tc.evidence = evidence.to;
       tc.executionDate = todayISO();
       tc.lastRunAt = nowISO();
       passed.push(tc);
-      ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} Resolved)`);
+      ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} Resolved)`, evidence);
     });
     if (passed.length){
       App.saveTestcases();
@@ -618,7 +651,7 @@ const BugReportModule = {
   statusBadge(status){
     const m = this.statusMaster().find(s => s.name === status);
     if (m && m.color) return `<span class="badge" style="color:${m.color}; background:color-mix(in srgb, ${m.color} 14%, transparent);">${escapeHtml(status)}</span>`;
-    const map = { 'Open':'open','Assigned':'assigned','In Progress':'inprogress','Ready To Test':'readytotest','Reopened':'reopened','Closed':'closed' };
+    const map = { 'Entry':'entry', 'Open':'open','Assigned':'assigned','In Progress':'inprogress','Ready To Test':'readytotest','Reopened':'reopened','Closed':'closed' };
     return `<span class="badge bug-${map[status] || 'open'}">${escapeHtml(status)}</span>`;
   },
 
@@ -714,9 +747,11 @@ const BugReportModule = {
     const bug = bugId ? this.all().find(b => b.id === bugId) : null;
     const canFull = Auth.can('bugreport_update');
     const canLimited = Auth.can('bugreport_updateStatusPriority');
+    const canPriority = Auth.can('bugreport_priority');
     if (!bug && !Auth.can('bugreport_create')){ Toast.show('Tidak punya izin membuat Bug Report.', 'error'); return; }
-    if (bug && !canFull && !canLimited){ Toast.show('Tidak punya izin mengedit Bug Report.', 'error'); return; }
-    this.ui.limitedEdit = !!(bug && !canFull && canLimited);
+    if (bug && !canFull && !canLimited && !canPriority){ Toast.show('Tidak punya izin mengedit Bug Report.', 'error'); return; }
+    this.ui.limitedEdit = !!(bug && !canFull && (canLimited || canPriority));
+    this.ui.priorityOnly = this.ui.limitedEdit && !canLimited; // e.g. PM/BA: Priority is the only field
 
     this.ui.editingId = bugId;
     this.ui.formTcId = null;
@@ -738,7 +773,8 @@ const BugReportModule = {
     const ws = (file && file.workspaceId) || (Auth.seesAllWorkspaces() ? '' : Auth.currentWorkspaceId());
     f.assignee.innerHTML = Auth.userOptions(bug ? bug.assignee : '', ws);
 
-    document.getElementById('bugModalTitle').textContent = bug ? `Edit Bug — ${bugCode(bug)}` : 'Buat Bug Report';
+    const draft = this.isDraft(bug);
+    document.getElementById('bugModalTitle').textContent = draft ? `Lengkapi Draft Bug — ${bugCode(bug)}` : bug ? `Edit Bug — ${bugCode(bug)}` : 'Buat Bug Report';
     document.getElementById('bugFieldId').value = bug ? bugCode(bug) : '(auto generate, nomor per workspace)';
     document.getElementById('bugFieldDate').value = formatDateTime(bug ? bug.reportDate : nowISO());
 
@@ -758,7 +794,7 @@ const BugReportModule = {
       f.stepsRef.value = stepsHtmlToText(bug.steps || ''); f.expectedResultRef.value = bug.expectedResult || '';
       f.title.value = bug.title || ''; f.description.value = bug.description || '';
       f.actualResult.value = bug.actualResult || '';
-      f.status.innerHTML = this.statusOptions(bug.status);
+      f.status.innerHTML = draft ? this.statusOptions() : this.statusOptions(bug.status);
       f.browser.value = bug.browser || ''; f.os.value = bug.os || ''; f.device.value = bug.device || '';
       f.buildVersion.value = bug.buildVersion || '';
       f.attachments.value = bug.attachments || ''; this.setTester(bug.tester);
@@ -781,7 +817,7 @@ const BugReportModule = {
     document.getElementById('bugTestCaseDropdown').classList.remove('open'); // don't carry an open picker over from the last form
     this.applyFormFieldLock();
     // A new bug always starts at the first status of the lifecycle.
-    if (!bug){ f.status.disabled = true; f.status.title = 'Bug baru selalu mulai dari status ini'; }
+    if (!bug || draft){ f.status.disabled = true; f.status.title = 'Bug baru selalu mulai dari status ini'; }
     this.updatePlatformFields();
     this.render();
     this.ui.formSnapshot = this.formSnapshot();
@@ -850,14 +886,16 @@ const BugReportModule = {
     else if (choice === 'save') document.getElementById('bugForm').requestSubmit();
   },
 
-  /* Limited editors (bugreport_updateStatusPriority without full bugreport_update)
-     can only change Status & Priority — every other field is disabled. */
+  /* Limited editors (no full bugreport_update): bugreport_updateStatusPriority keeps Status /
+     Priority / Due Date, bugreport_priority alone keeps Priority only. Priority itself is
+     locked for everyone without bugreport_priority (Developer / QA). */
   applyFormFieldLock(){
     const f = document.getElementById('bugForm');
-    const keepEnabled = ['status', 'priority', 'dueDate'];
+    const keepEnabled = this.ui.priorityOnly ? ['priority'] : ['status', 'priority', 'dueDate'];
+    const canPriority = Auth.can('bugreport_priority');
     Array.from(f.elements).forEach(el => {
       if (!el.name) return;
-      el.disabled = this.ui.limitedEdit && !keepEnabled.includes(el.name);
+      el.disabled = (this.ui.limitedEdit && !keepEnabled.includes(el.name)) || (el.name === 'priority' && !canPriority);
     });
   },
 
@@ -1005,6 +1043,7 @@ const BugReportModule = {
     if (this.ui.saving) return; // no double submit
     const f = e.target;
     const creating = !this.ui.editingId;
+    const wasDraft = !creating && this.isDraft(App.state.bugs.find(b => b.id === this.ui.editingId));
     const show = BUG_FORM.conditionalFields(f.platform.value);
     const linked = !!f.testCaseId.value;
     const data = {
@@ -1027,7 +1066,7 @@ const BugReportModule = {
       attachments: f.attachments.value.trim(),
       assignee: f.assignee.value
     };
-    const errors = this.ui.limitedEdit ? {} : BUG_FORM.errors({ ...data, steps: f.stepsRef.value }, creating);
+    const errors = this.ui.limitedEdit ? {} : BUG_FORM.errors({ ...data, steps: f.stepsRef.value }, creating || wasDraft);
     if (Object.keys(errors).length){ this.showFormErrors(errors); return; }
 
     const btn = document.getElementById('bugFormSubmitBtn');
@@ -1037,7 +1076,8 @@ const BugReportModule = {
         const idx = App.state.bugs.findIndex(b => b.id === this.ui.editingId);
         const prev = App.state.bugs[idx];
         let change = null;
-        if (prev.status !== data.status){
+        if (wasDraft) data.reportDate = nowISO(); // SLA counts from when it's reported, not drafted
+        else if (prev.status !== data.status){
           change = await this.confirmStatusChange([prev], data.status, `${bugCode(prev)}: ${prev.status} → ${data.status}`);
           if (!change) return; // form stays open so nothing typed is lost
           this.logActivity(prev, prev.status, data.status, change);
@@ -1045,7 +1085,8 @@ const BugReportModule = {
         Auth.logAssignment(prev, prev.assignee, data.assignee);
         App.state.bugs[idx] = { ...prev, ...data };
         await App.saveBugs();
-        ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}${change.note ? `: ${change.note}` : ''})` : ''}`);
+        if (wasDraft) ActivityLog.record('bugreport_create', `Bug ${bugCode(prev)} dibuat dari draft`);
+        else ActivityLog.record('bugreport_update', `Bug ${bugCode(prev)} diperbarui${change ? ` (status ${prev.status} → ${data.status}${change.note ? `: ${change.note}` : ''})` : ''}`);
         Toast.show(`Bug ${bugCode(prev)} diperbarui.`, 'success');
         if (change) this.passLinkedTestCases([App.state.bugs[idx]]);
       } else {
@@ -1098,11 +1139,11 @@ const BugReportModule = {
 
   async bulkUpdateStatus(status){
     if (!this.ui.selected.size || !status) return;
-    const change = await this.confirmStatusChange(this.all().filter(b => this.ui.selected.has(b.id)), status, `${this.ui.selected.size} bug → ${status}`);
+    const change = await this.confirmStatusChange(this.all().filter(b => this.ui.selected.has(b.id) && !this.isDraft(b)), status, `${this.ui.selected.size} bug → ${status}`);
     if (!change) return;
     const moved = [];
     App.state.bugs.forEach(b => {
-      if (this.ui.selected.has(b.id) && b.status !== status){
+      if (this.ui.selected.has(b.id) && b.status !== status && !this.isDraft(b)){ // drafts are finished in the form
         this.logActivity(b, b.status, status, change);
         b.status = status;
         moved.push(b);
@@ -1113,7 +1154,7 @@ const BugReportModule = {
     this.passLinkedTestCases(moved);
     this.render();
     if (changed) ActivityLog.record('bugreport_update', `${changed} bug status diubah menjadi ${status} (bulk)${change.note ? `: ${change.note}` : ''}`);
-    Toast.show(`Status ${this.ui.selected.size} bug diubah menjadi ${status}.`, 'success');
+    Toast.show(`Status ${changed} bug diubah menjadi ${status}.`, 'success');
   },
 
   printOne(id){
@@ -1124,6 +1165,7 @@ const BugReportModule = {
 
   /* ---- Export ---- */
   exportExcel(){
+    if (!Auth.can('bugreport_export')) return;
     const rows = this.filtered().map(b => ({
       'Bug ID': bugCode(b), 'Test Case ID': this.tcLabel(b.testCaseId), Module: b.module,
       Scenario: b.scenario, 'Pre-condition': b.preconditions || '', 'Test Data': b.testData || '',
@@ -1142,6 +1184,7 @@ const BugReportModule = {
     Toast.show('Export Excel Bug Report berhasil.', 'success');
   },
   exportCSV(){
+    if (!Auth.can('bugreport_export')) return;
     const cols = [
       {key:'code',label:'Bug ID'},{key:'testCaseId',label:'Test Case ID'},{key:'module',label:'Module'},
       {key:'scenario',label:'Scenario'},{key:'title',label:'Bug Title'},
@@ -1159,7 +1202,7 @@ const BugReportModule = {
 
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
-    if (!Auth.can('bugreport_create')) return;
+    if (!Auth.can('bugreport_create') || !Auth.can('bugreport_import')) return;
     const reader = new FileReader();
     reader.onload = (e) => {
       try{
@@ -1169,8 +1212,9 @@ const BugReportModule = {
         let count = 0, sheetsUsed = 0;
         const unknownTc = new Set();
         const skipped = []; // { sheet, row, fields } per row missing a required field
-        // Same bug = same Module + Bug Title in this file (or earlier in the sheet): skipped.
-        const DUP = ['module', 'title'];
+        // Same bug = same Test Case + Module + Bug Title in this file (or earlier in the sheet): skipped.
+        // The test case is part of it so one title typed for several test cases still makes one bug each.
+        const DUP = ['testCaseId', 'module', 'title'];
         const seen = new Set(this.all().filter(b => b.fileId === this.ui.activeFileId).map(b => TC_IMPORT.dupKey(b, DUP)));
         let same = 0;
         wb.SheetNames.forEach(sheetName => {
@@ -1223,6 +1267,9 @@ const BugReportModule = {
             if (seen.has(key)){ same++; return; }
             seen.add(key);
             Auth.logAssignment(bug, '', bug.assignee); // assignee gets the bell notification
+            // The test case already has an auto draft (Entry): fill that one instead of a second bug.
+            const draft = testCaseId && App.state.bugs.find(b => b.testCaseId === testCaseId && this.isDraft(b));
+            if (draft){ Object.assign(draft, { ...bug, id: draft.id, code: draft.code, fileId: draft.fileId }); count++; return; }
             App.state.bugs.push(bug);
             count++;
           });

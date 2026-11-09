@@ -483,6 +483,7 @@ table.data-table th.center, table.data-table td.center{text-align:center;}
 .badge.sev-medium{background:var(--sev-medium-bg); color:var(--sev-medium);}
 .badge.sev-low{background:var(--sev-low-bg); color:var(--sev-low);}
 .badge.bug-open{background:var(--sev-critical-bg); color:var(--bug-open);}
+.badge.bug-entry{background:var(--status-notrun-bg); color:var(--status-notrun);}
 .badge.bug-assigned{background:var(--status-blocked-bg); color:var(--bug-assigned);}
 .badge.bug-inprogress{background:var(--sev-low-bg); color:var(--bug-inprogress);}
 .badge.bug-readytotest{background:var(--primary-soft); color:var(--bug-readytotest);}
@@ -1104,9 +1105,14 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .notif-item{display:flex; gap:10px; padding:9px 10px; border-radius:var(--radius-s); cursor:pointer; font-size:13px;}
 .notif-item:hover{background:var(--primary-soft);}
 .notif-item.unread{background:color-mix(in srgb, var(--primary) 7%, transparent);}
-.notif-item.unread .notif-text{font-weight:700;}
+.notif-item.unread .notif-text{color:var(--text); font-weight:600;}
+.notif-body{flex:1; min-width:0;}
+.notif-head{display:flex; align-items:baseline; gap:6px; min-width:0;}
+.notif-head b{flex:none;}
+.notif-file{font-size:11.5px; font-style:italic; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.notif-text{color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .notif-icon{flex:none; width:20px; text-align:center;}
-.notif-note{font-size:12px; color:var(--text-dim); margin-top:2px; white-space:pre-wrap; word-break:break-word;}
+.notif-note{font-size:12px; color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .notif-meta{font-size:11.5px; color:var(--text-faint); margin-top:2px;}
 /* File card info button + detail dialog */
 .file-card-actions{display:flex; align-items:center; gap:2px; flex:none;}
