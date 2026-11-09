@@ -96,10 +96,6 @@ const App = {
       if (replace || !history.state) history.replaceState({ page }, '', url);
       else if (history.state.page !== page) history.pushState({ page }, '', url);
     }
-    // Menu change: file/filter/search picks don't carry over to the next visit.
-    // Bug Report <-> its detail page is one view (Back from detail keeps the open file).
-    const prev = this.state.currentPage, sameView = p => p === 'bugreport' || p === 'bugdetail';
-    if (prev && prev !== page && !(sameView(prev) && sameView(page))) this.resetViewState();
     this.state.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item, .nav-subitem').forEach(n => n.classList.remove('active'));
@@ -453,7 +449,7 @@ const App = {
     return perm ? Auth.can(perm) : false;
   },
   /* Clears every page's open file, search, filters and selections (state + inputs).
-     Used on menu change and workspace switch, so nothing picked earlier lingers. */
+     Used on workspace switch, so nothing picked in the old workspace lingers. */
   resetViewState(){
     [TestCaseModule, BugReportModule, ActivityLogModule].forEach(m => {
       m.ui.search = ''; m.ui.page = 1;
