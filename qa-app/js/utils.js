@@ -639,6 +639,25 @@ const IdGen = {
     }, 0);
     return `${prefix}-${String(max + 1).padStart(4, '0')}`;
   },
+  /* Same display number twice in one workspace (file moved in, or two users saving at
+     once) -> later copies get the next free number. Only `code` changes; rows are never
+     removed and the internal id (used by links) stays. Rows of `lastFileId` (a file just
+     moved) give way first, so the target workspace keeps its numbers. */
+  dedupe(items, codeOf, scopeOf, lastFileId){
+    const used = {}, seen = {}, changes = [];
+    items.forEach(x => (used[scopeOf(x) || ''] ||= new Set()).add(codeOf(x)));
+    const moved = x => lastFileId != null && x.fileId === lastFileId;
+    items.filter(x => !moved(x)).concat(items.filter(moved)).forEach(x => {
+      const scope = scopeOf(x) || '', code = codeOf(x), s = (seen[scope] ||= new Set());
+      const m = String(code).match(/^([A-Z]+)-\d+$/);
+      if (m && s.has(code)){
+        const to = this.nextInScope(m[1], [...used[scope]]);
+        used[scope].add(to); s.add(to); x.code = to;
+        changes.push({ from: code, to });
+      } else s.add(code);
+    });
+    return changes;
+  },
   uid(prefix){ return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; },
   next(prefix){
     const counters = Storage.get(STORAGE_KEYS.COUNTERS, {});

@@ -28,6 +28,17 @@ const App = {
     this.ensureRolePermissions();
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
+    this.fixDuplicateCodes();
+  },
+  /* Renumbers duplicate Test Case / Bug numbers per workspace (see IdGen.dedupe).
+     Runs on every load (fixes old data, idempotent) and after a file changes workspace. */
+  fixDuplicateCodes(movedFileId){
+    const ws = x => fileWorkspace(x.fileId);
+    const list = c => c.slice(0, 20).map(x => `${x.from} → ${x.to}`).join(', ') + (c.length > 20 ? `, +${c.length - 20} lainnya` : '');
+    const tc = IdGen.dedupe(this.state.testcases, tcCode, ws, movedFileId);
+    const bug = IdGen.dedupe(this.state.bugs, bugCode, ws, movedFileId);
+    if (tc.length){ this.saveTestcases(); ActivityLog.record('testcase_update', `Nomor Test Case dobel diganti: ${list(tc)}`); }
+    if (bug.length){ this.saveBugs(); ActivityLog.record('bugreport_update', `Nomor Bug dobel diganti: ${list(bug)}`); }
   },
   /* Merge default permissions into settings so newly-added permission keys
      show up on the matrix, without clobbering an admin's saved overrides. */

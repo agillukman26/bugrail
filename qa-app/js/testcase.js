@@ -84,6 +84,7 @@ const TestCaseModule = {
     file.name = result.name;
     if (canShare || result.workspaceId !== oldWs) file.sharedWith = result.sharedWith;
     file.workspaceId = result.workspaceId;
+    if (oldWs !== file.workspaceId) App.fixDuplicateCodes(file.id);
     App.saveFiles();
     if (oldWs !== file.workspaceId) ActivityLog.record('tc_file_move', `File Test Case "${file.name}" dipindah dari ${WorkspacePicker.nameOf(oldWs || WorkspaceCalc.ALL)} ke ${WorkspacePicker.nameOf(file.workspaceId || WorkspaceCalc.ALL)}`);
     if (oldName !== file.name) ActivityLog.record('tc_file_rename', `File Test Case "${oldName}" diganti nama jadi "${file.name}"`);

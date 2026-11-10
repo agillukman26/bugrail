@@ -106,6 +106,7 @@ const BugReportModule = {
     file.name = result.name;
     if (canShare || result.workspaceId !== oldWs) file.sharedWith = result.sharedWith;
     file.workspaceId = result.workspaceId;
+    if (oldWs !== file.workspaceId) App.fixDuplicateCodes(file.id);
     App.saveFiles();
     if (oldWs !== file.workspaceId) ActivityLog.record('bug_file_move', `File Bug Report "${file.name}" dipindah dari ${WorkspacePicker.nameOf(oldWs || WorkspaceCalc.ALL)} ke ${WorkspacePicker.nameOf(file.workspaceId || WorkspaceCalc.ALL)}`);
     if (oldName !== file.name) ActivityLog.record('bug_file_rename', `File Bug Report "${oldName}" diganti nama jadi "${file.name}"`);
