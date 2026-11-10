@@ -405,7 +405,7 @@ const BUG_FORM = {
   PLATFORMS: ['Web', 'Mobile App', 'Desktop', 'API'],
   ENVIRONMENTS: ['Local', 'Development', 'Staging', 'UAT', 'Production'],
   PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
-  // Fix deadline per Priority, in days from Report Date (mirrors ReportCalc.SLA_DAYS per severity).
+  // Fix deadline per Priority, in days from Report Date (same table as ReportCalc.SLA_DAYS).
   SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
   /* bug.dueDate (set by PM in the form) wins: YYYY-MM-DDTHH:mm (local), or legacy
      YYYY-MM-DD = end of that day. Empty = derived from Priority, so changing Priority
@@ -638,6 +638,25 @@ const IdGen = {
       return hit ? Math.max(m, parseInt(hit[1], 10)) : m;
     }, 0);
     return `${prefix}-${String(max + 1).padStart(4, '0')}`;
+  },
+  /* Same display number twice in one workspace (file moved in, or two users saving at
+     once) -> later copies get the next free number. Only `code` changes; rows are never
+     removed and the internal id (used by links) stays. Rows of `lastFileId` (a file just
+     moved) give way first, so the target workspace keeps its numbers. */
+  dedupe(items, codeOf, scopeOf, lastFileId){
+    const used = {}, seen = {}, changes = [];
+    items.forEach(x => (used[scopeOf(x) || ''] ||= new Set()).add(codeOf(x)));
+    const moved = x => lastFileId != null && x.fileId === lastFileId;
+    items.filter(x => !moved(x)).concat(items.filter(moved)).forEach(x => {
+      const scope = scopeOf(x) || '', code = codeOf(x), s = (seen[scope] ||= new Set());
+      const m = String(code).match(/^([A-Z]+)-\d+$/);
+      if (m && s.has(code)){
+        const to = this.nextInScope(m[1], [...used[scope]]);
+        used[scope].add(to); s.add(to); x.code = to;
+        changes.push({ from: code, to });
+      } else s.add(code);
+    });
+    return changes;
   },
   uid(prefix){ return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; },
   next(prefix){

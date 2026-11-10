@@ -28,6 +28,17 @@ const App = {
     this.ensureRolePermissions();
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
+    this.fixDuplicateCodes();
+  },
+  /* Renumbers duplicate Test Case / Bug numbers per workspace (see IdGen.dedupe).
+     Runs on every load (fixes old data, idempotent) and after a file changes workspace. */
+  fixDuplicateCodes(movedFileId){
+    const ws = x => fileWorkspace(x.fileId);
+    const list = c => c.slice(0, 20).map(x => `${x.from} → ${x.to}`).join(', ') + (c.length > 20 ? `, +${c.length - 20} lainnya` : '');
+    const tc = IdGen.dedupe(this.state.testcases, tcCode, ws, movedFileId);
+    const bug = IdGen.dedupe(this.state.bugs, bugCode, ws, movedFileId);
+    if (tc.length){ this.saveTestcases(); ActivityLog.record('testcase_update', `Nomor Test Case dobel diganti: ${list(tc)}`); }
+    if (bug.length){ this.saveBugs(); ActivityLog.record('bugreport_update', `Nomor Bug dobel diganti: ${list(bug)}`); }
   },
   /* Merge default permissions into settings so newly-added permission keys
      show up on the matrix, without clobbering an admin's saved overrides. */
@@ -95,6 +106,12 @@ const App = {
       const url = base + (page === 'bugdetail' ? `#bug=${encodeURIComponent(BugReportModule.ui.detailId)}` : '');
       if (replace || !history.state) history.replaceState({ page }, '', url);
       else if (history.state.page !== page) history.pushState({ page }, '', url);
+    }
+    // Test Case <-> Bug Report share files: the file open on the page we leave opens on the next one.
+    const fileView = { testcase: TestCaseModule, bugreport: BugReportModule, bugdetail: BugReportModule };
+    const from = fileView[this.state.currentPage], to = fileView[page];
+    if (from && to && from !== to && from.ui.activeFileId && to.ui.activeFileId !== from.ui.activeFileId){
+      to.ui.activeFileId = from.ui.activeFileId; to.ui.page = 1; to.ui.selected.clear();
     }
     this.state.currentPage = page;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
