@@ -405,7 +405,7 @@ const BUG_FORM = {
   PLATFORMS: ['Web', 'Mobile App', 'Desktop', 'API'],
   ENVIRONMENTS: ['Local', 'Development', 'Staging', 'UAT', 'Production'],
   PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
-  // Fix deadline per Priority, in days from Report Date (mirrors ReportCalc.SLA_DAYS per severity).
+  // Fix deadline per Priority, in days from Report Date (same table as ReportCalc.SLA_DAYS).
   SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
   /* bug.dueDate (set by PM in the form) wins: YYYY-MM-DDTHH:mm (local), or legacy
      YYYY-MM-DD = end of that day. Empty = derived from Priority, so changing Priority

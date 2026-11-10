@@ -12,7 +12,7 @@ const ReportCalc = {
   GO_PASS_RATE: 95,
   COND_PASS_RATE: 90,
   COND_MAX_HIGH_OPEN: 2,
-  SLA_DAYS: { Critical: 1, High: 3, Medium: 7, Low: 14 },
+  SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 }, // per Priority; fallback when master has no SLA
   SPEED_FAST_PCT: 80,
   SPEED_OK_PCT: 50,
   DONE_STATUSES: ['Closed', 'Rejected'],       // Resolved is not done: QA hasn't verified it yet
@@ -157,37 +157,44 @@ const ReportCalc = {
   },
 
   /* Fix time = reportDate -> last "-> Closed" entry in the status log. Bugs closed
-     without a logged transition (imported/old data) can't be measured. */
+     without a logged transition (imported/old data) can't be measured.
+     Target = the bug's Due Date (BUG_FORM: master Priority SLA, or the date PM set),
+     grouped by Priority. Outside the app (Node check) the built-in table is used. */
   speedStats(bugs, now = Date.now()){
-    const slaHours = sev => (this.SLA_DAYS[sev] || this.SLA_DAYS.Medium) * 24;
-    const bySeverity = {};
-    Object.keys(this.SLA_DAYS).forEach(s => { bySeverity[s] = { count: 0, onTime: 0, totalHours: 0 }; });
+    const inApp = typeof BUG_LEVELS !== 'undefined' && typeof BUG_FORM !== 'undefined';
+    const prios = inApp ? BUG_LEVELS.names('priority') : Object.keys(this.SLA_DAYS);
+    const prioOf = b => { const p = b.priority === 'Highest' || b.priority === 'Critical' ? 'Urgent' : b.priority; return prios.includes(p) ? p : (prios.includes('Medium') ? 'Medium' : prios[prios.length - 1]); };
+    const levelHours = p => { const l = inApp && BUG_LEVELS.find('priority', p); return (l && BUG_LEVELS.slaHours(l)) || (this.SLA_DAYS[p] || this.SLA_DAYS.Medium) * 24; };
+    const slaHours = b => { const due = inApp && BUG_FORM.dueDate(b); return due ? (new Date(due) - new Date(b.reportDate)) / 36e5 : levelHours(prioOf(b)); };
+    const byPriority = {};
+    prios.forEach(p => { byPriority[p] = { count: 0, onTime: 0, totalHours: 0, slaHours: levelHours(p) }; });
     let measured = 0, onTime = 0, unmeasured = 0;
     const overdueOpen = [];
 
     bugs.forEach(b => {
-      const sev = this.SLA_DAYS[b.severity] ? b.severity : 'Medium';
+      if (b.status === 'Entry') return; // draft: SLA starts once it's reported
+      const p = prioOf(b);
       if (b.status === 'Closed'){
         const closed = (b.activity || []).filter(a => a.to === 'Closed');
         const hours = closed.length && b.reportDate ? (new Date(closed[closed.length - 1].at) - new Date(b.reportDate)) / 36e5 : NaN;
         if (!(hours >= 0)){ unmeasured++; return; }
         measured++;
-        bySeverity[sev].count++;
-        bySeverity[sev].totalHours += hours;
-        if (hours <= slaHours(sev)){ onTime++; bySeverity[sev].onTime++; }
+        byPriority[p].count++;
+        byPriority[p].totalHours += hours;
+        if (hours <= slaHours(b)){ onTime++; byPriority[p].onTime++; }
       } else if (this.isOpen(b) && b.reportDate){
         const age = (now - new Date(b.reportDate)) / 36e5;
-        if (age > slaHours(sev)) overdueOpen.push({ bug: b, ageHours: age, slaHours: slaHours(sev) });
+        if (age > slaHours(b)) overdueOpen.push({ bug: b, ageHours: age, slaHours: slaHours(b) });
       }
     });
 
-    Object.values(bySeverity).forEach(s => { s.avgHours = s.count ? s.totalHours / s.count : 0; });
+    Object.values(byPriority).forEach(s => { s.avgHours = s.count ? s.totalHours / s.count : 0; });
     overdueOpen.sort((a, b) => (b.ageHours - b.slaHours) - (a.ageHours - a.slaHours));
     const onTimePct = measured ? Math.round(onTime / measured * 100) : null;
     const verdict = onTimePct === null ? 'NA'
       : onTimePct >= this.SPEED_FAST_PCT ? 'FAST'
       : onTimePct >= this.SPEED_OK_PCT ? 'WATCH' : 'SLOW';
-    return { measured, onTime, unmeasured, onTimePct, bySeverity, overdueOpen, verdict };
+    return { measured, onTime, unmeasured, onTimePct, byPriority, overdueOpen, verdict };
   },
 
   /* ---- QA view (internal): where testing is stuck ---- */
@@ -1034,14 +1041,14 @@ const ReportModule = {
 
     const speedWord = { FAST: 'Cepat', WATCH: 'Perlu perhatian', SLOW: 'Lambat', NA: 'Belum ada data' }[s.verdict];
     y = sectionTitle(`Kecepatan Penanganan Bug - ${speedWord}${s.measured ? ` (${s.onTimePct}% tepat waktu)` : ''}`, y);
-    y = table(y, ['Severity', 'Target', 'Bug Selesai', 'Rata-rata Durasi', 'Tepat Waktu'],
-      Object.entries(s.bySeverity).map(([sev, v]) => [sev, `${ReportCalc.SLA_DAYS[sev]} hari`, v.count, formatDuration(v.avgHours),
+    y = table(y, ['Priority', 'Target', 'Bug Selesai', 'Rata-rata Durasi', 'Tepat Waktu'],
+      Object.entries(s.byPriority).map(([p, v]) => [p, BUG_LEVELS.slaLabel(v.slaHours), v.count, formatDuration(v.avgHours),
         v.count ? `${v.onTime}/${v.count} (${Math.round(v.onTime / v.count * 100)}%)` : '-']));
     if (s.unmeasured) y = paragraph([`${s.unmeasured} bug Closed tidak bisa diukur karena tidak punya riwayat status.`], y - 4) + 4;
     if (s.overdueOpen.length){
       y = sectionTitle('Bug Terbuka yang Melewati Target', y);
-      table(y, ['ID', 'Judul', 'Severity', 'Status', 'Umur', 'Target'],
-        s.overdueOpen.map(x => [bugCode(x.bug), x.bug.title, x.bug.severity || '-', x.bug.status, formatDuration(x.ageHours), formatDuration(x.slaHours)]),
+      table(y, ['ID', 'Judul', 'Priority', 'Status', 'Umur', 'Target'],
+        s.overdueOpen.map(x => [bugCode(x.bug), x.bug.title, x.bug.priority || '-', x.bug.status, formatDuration(x.ageHours), formatDuration(x.slaHours)]),
         { 1: { cellWidth: 70 } });
     }
 

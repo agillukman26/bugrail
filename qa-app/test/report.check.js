@@ -111,18 +111,24 @@ assert.strictEqual(reo.byModule[0].module, 'Login');
 // Speed vs SLA
 const day = 864e5, t0 = Date.parse('2026-01-01T00:00:00Z');
 const at = d => new Date(t0 + d * day).toISOString();
+const pb = (priority, status, extra) => ({ ...bug('Low', status, extra), priority }); // severity is ignored for SLA
 const sp = R.speedStats([
-  bug('Critical', 'Closed', { reportDate: at(0), activity: [{ to: 'Closed', at: at(0.5) }] }), // on time
-  bug('High', 'Closed', { reportDate: at(0), activity: [{ to: 'Closed', at: at(5) }] }),       // late (SLA 3)
-  bug('Low', 'Closed', { reportDate: at(0) }),                                                   // unmeasured
-  bug('Medium', 'Open', { reportDate: at(0) }),                                                  // overdue at day 10
-  bug('Low', 'Open', { reportDate: at(0) })                                                      // within 14d
+  pb('Urgent', 'Closed', { reportDate: at(0), activity: [{ to: 'Closed', at: at(0.5) }] }), // on time
+  pb('High', 'Closed', { reportDate: at(0), activity: [{ to: 'Closed', at: at(5) }] }),     // late (SLA 3)
+  pb('Low', 'Closed', { reportDate: at(0) }),                                                 // unmeasured
+  pb('Medium', 'Open', { reportDate: at(0) }),                                                // overdue at day 10
+  pb('Low', 'Open', { reportDate: at(0) }),                                                   // within 14d
+  pb('Critical', 'Open', { reportDate: at(9.5) }),                                            // legacy name = Urgent, within 1d
+  pb('Urgent', 'Entry', { reportDate: at(0) })                                                // draft: no SLA yet
 ], t0 + 10 * day);
 assert.strictEqual(sp.measured, 2);
 assert.strictEqual(sp.unmeasured, 1);
 assert.strictEqual(sp.onTimePct, 50);
 assert.strictEqual(sp.verdict, 'WATCH');
 assert.strictEqual(sp.overdueOpen.length, 1);
+assert.strictEqual(sp.overdueOpen[0].bug.priority, 'Medium');
+assert.strictEqual(sp.byPriority.Urgent.onTime, 1);
+assert.strictEqual(sp.byPriority.High.count, 1);
 assert.strictEqual(R.speedStats([]).verdict, 'NA');
 
 // Business summary always gives a verdict + at least one next step
