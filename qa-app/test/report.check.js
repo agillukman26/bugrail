@@ -119,7 +119,8 @@ const sp = R.speedStats([
   pb('Medium', 'Open', { reportDate: at(0) }),                                                // overdue at day 10
   pb('Low', 'Open', { reportDate: at(0) }),                                                   // within 14d
   pb('Critical', 'Open', { reportDate: at(9.5) }),                                            // legacy name = Urgent, within 1d
-  pb('Urgent', 'Entry', { reportDate: at(0) })                                                // draft: no SLA yet
+  pb('Urgent', 'Entry', { reportDate: at(0) }),                                               // draft: no SLA yet
+  pb('', 'Open', { reportDate: at(0) })                                                       // no Priority: no SLA
 ], t0 + 10 * day);
 assert.strictEqual(sp.measured, 2);
 assert.strictEqual(sp.unmeasured, 1);

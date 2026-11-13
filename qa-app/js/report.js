@@ -172,7 +172,7 @@ const ReportCalc = {
     const overdueOpen = [];
 
     bugs.forEach(b => {
-      if (b.status === 'Entry') return; // draft: SLA starts once it's reported
+      if (b.status === 'Entry' || !b.priority) return; // draft / no Priority yet: no SLA
       const p = prioOf(b);
       if (b.status === 'Closed'){
         const closed = (b.activity || []).filter(a => a.to === 'Closed');

@@ -409,10 +409,11 @@ const BUG_FORM = {
   SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
   /* bug.dueDate (set by PM in the form) wins: YYYY-MM-DDTHH:mm (local), or legacy
      YYYY-MM-DD = end of that day. Empty = derived from Priority, so changing Priority
-     moves it automatically. Unknown/empty priority counts as Medium.
-     Returns ISO string, '' without reportDate. */
+     moves it automatically. Unknown priority counts as Medium.
+     Returns ISO string; '' without reportDate or Priority (no SLA until PM sets Priority). */
   dueDate(bug){
     if (bug && bug.status === 'Entry') return ''; // draft bug: SLA starts once it's reported
+    if (!bug || !bug.priority) return ''; // Priority not set yet: no due date / SLA reminder
     if (bug && /^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
     if (bug && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(bug.dueDate || '')) return new Date(bug.dueDate).toISOString();
     if (!bug || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';

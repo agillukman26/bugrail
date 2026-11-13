@@ -22,7 +22,7 @@ assert.strictEqual(keys(F.errors({})), 'actualResult,expectedResult,module,sever
 assert.strictEqual(keys(F.errors({}, false)), 'actualResult,title', 'edit keeps the old minimum');
 
 assert.ok(F.errors({ ...valid, title: 'abcd' }).title, 'title < 5');
-assert.ok(F.errors({ ...valid, title: 'x'.repeat(151) }).title, 'title > 150');
+assert.ok(F.errors({ ...valid, title: 'x'.repeat(226) }).title, 'title > 225');
 assert.ok(!F.errors({ ...valid, title: '  abcde  ' }).title, 'title is trimmed');
 assert.ok(F.errors({ ...valid, steps: 'short' }).steps, 'steps < 10');
 assert.ok(F.errors({ ...valid, description: 'x'.repeat(2001) }).description, 'notes > 2000');
@@ -62,7 +62,9 @@ assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Urgent' }), '2026-01-0
 assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Critical' }), '2026-01-02T00:00:00.000Z');
 assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'High' }), '2026-01-04T00:00:00.000Z');
 assert.strictEqual(F.dueDate({ reportDate: rd, priority: 'Low' }), '2026-01-15T00:00:00.000Z');
-assert.strictEqual(F.dueDate({ reportDate: rd }), '2026-01-08T00:00:00.000Z');
+assert.strictEqual(F.dueDate({ reportDate: rd }), ''); // no Priority = no SLA
+assert.strictEqual(F.dueDate({ reportDate: rd, dueDate: '2026-01-03' }), '');
+assert.strictEqual(F.isOverdue({ reportDate: rd, status: 'Open' }, new Date('2026-12-31').getTime()), false);
 assert.strictEqual(F.dueDate({ priority: 'High' }), '');
 const later = new Date('2026-01-10').getTime();
 assert.strictEqual(F.isOverdue({ reportDate: rd, priority: 'High', status: 'Open' }, later), true);

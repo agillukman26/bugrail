@@ -753,7 +753,7 @@ const BugReportModule = {
     if (!bug && !Auth.can('bugreport_create')){ Toast.show('Tidak punya izin membuat Bug Report.', 'error'); return; }
     if (bug && !canFull && !canLimited && !canPriority){ Toast.show('Tidak punya izin mengedit Bug Report.', 'error'); return; }
     this.ui.limitedEdit = !!(bug && !canFull && (canLimited || canPriority));
-    this.ui.priorityOnly = this.ui.limitedEdit && !canLimited; // e.g. PM/BA: Priority is the only field
+    this.ui.priorityOnly = this.ui.limitedEdit && !canLimited; // e.g. PM/BA: only Priority + Due Date
 
     this.ui.editingId = bugId;
     this.ui.formTcId = null;
@@ -889,15 +889,15 @@ const BugReportModule = {
   },
 
   /* Limited editors (no full bugreport_update): bugreport_updateStatusPriority keeps Status /
-     Priority / Due Date, bugreport_priority alone keeps Priority only. Priority itself is
-     locked for everyone without bugreport_priority (Developer / QA). */
+     Priority / Due Date, bugreport_priority alone keeps Priority / Due Date only. Priority and
+     Due Date are locked for everyone without bugreport_priority (Developer / QA) — PM sets them. */
   applyFormFieldLock(){
     const f = document.getElementById('bugForm');
-    const keepEnabled = this.ui.priorityOnly ? ['priority'] : ['status', 'priority', 'dueDate'];
+    const keepEnabled = this.ui.priorityOnly ? ['priority', 'dueDate'] : ['status', 'priority', 'dueDate'];
     const canPriority = Auth.can('bugreport_priority');
     Array.from(f.elements).forEach(el => {
       if (!el.name) return;
-      el.disabled = (this.ui.limitedEdit && !keepEnabled.includes(el.name)) || (el.name === 'priority' && !canPriority);
+      el.disabled = (this.ui.limitedEdit && !keepEnabled.includes(el.name)) || (['priority', 'dueDate'].includes(el.name) && !canPriority);
     });
   },
 
