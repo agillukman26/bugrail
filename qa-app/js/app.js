@@ -565,3 +565,8 @@ const App = {
 };
 
 /* App.init() is triggered by Auth once a role (Admin/User) is chosen — see auth.js. */
+
+/* Desktop app, not a document: block touchpad pinch-zoom (Chrome sends it as ctrl+wheel),
+   which magnifies + pans the page so the sidebar gets cut and the view slides around.
+   Ctrl +/- / Ctrl+0 still zoom the page normally (that re-lays it out). */
+document.addEventListener('wheel', e => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
