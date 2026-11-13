@@ -221,8 +221,7 @@ const TestCaseModule = {
               ${canUpdate ? `<button class="dropdown-item" data-act="run" data-id="${tc.id}">▶ Run</button>` : ''}
               ${canUpdate ? `<button class="dropdown-item" data-act="edit" data-id="${tc.id}">✎ Edit</button>` : ''}
               ${canCreate ? `<button class="dropdown-item" data-act="dup" data-id="${tc.id}">⧉ Duplicate</button>` : ''}
-              ${canApprove && tc.status !== 'Open' && (tc.approval || {}).result !== 'approved' ? `<button class="dropdown-item" data-act="approve" data-id="${tc.id}">✔ Approve</button>` : ''}
-              ${canApprove && tc.status !== 'Open' && (tc.approval || {}).result !== 'rejected' ? `<button class="dropdown-item" data-act="reject" data-id="${tc.id}">✖ Reject</button>` : ''}
+              ${canApprove && tc.status !== 'Open' ? `<button class="dropdown-item" data-act="approval" data-id="${tc.id}">☑ Approval</button>` : ''}
               ${canDelete ? `<button class="dropdown-item" data-act="del" data-id="${tc.id}">🗑 Hapus</button>` : ''}
               ${tc.status === 'Failed' && canCreateBug ? `<button class="dropdown-item" data-act="bug" data-id="${tc.id}">🐞 Create Bug</button>` : ''}
             </div>
@@ -298,6 +297,7 @@ const TestCaseModule = {
     }
     tc.approval = { result, by: Auth.currentEmail(), at: nowISO(), note };
     App.saveTestcases();
+    this.closeExecute();
     ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : `di-reject: ${note}`}`);
     Toast.show(`Test case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : 'di-reject'}.`, result === 'approved' ? 'success' : 'info');
     this.render();
@@ -394,7 +394,7 @@ Alasan: ${a.note}` : ''}`);
         if (act === 'dup') this.duplicate(id);
         if (act === 'del') this.remove(id);
         if (act === 'bug') this.createBugFromTestCase(id);
-        if (act === 'approve' || act === 'reject') this.setApproval(id, act === 'approve' ? 'approved' : 'rejected');
+        if (act === 'approval') this.openExecute(id, true);
       };
     });
   },
@@ -696,21 +696,27 @@ Alasan: ${a.note}` : ''}`);
     document.getElementById('tcDetailModalOverlay').classList.add('active');
   },
 
-  openExecute(id){
+  /* approval = validator view: same Run modal, every field read-only, Approve / Reject instead of Simpan. */
+  openExecute(id, approval = false){
     this.ui.executingId = id;
+    this.ui.approving = approval;
     const tc = this.all().find(t => t.id === id);
-    document.getElementById('runModalTitle').textContent = `Execute — ${tcCode(tc)}`;
+    document.getElementById('runModalTitle').textContent = `${approval ? 'Approval' : 'Execute'} — ${tcCode(tc)}`;
     document.getElementById('runScenario').textContent = tc.scenario;
     document.getElementById('runExpected').textContent = tc.expectedResult || '-';
     const f = document.getElementById('runForm');
     f.actualResult.value = tc.actualResult || '';
     f.evidence.value = tc.evidence || '';
     f.status.value = tc.status;
+    [f.actualResult, f.evidence, f.status].forEach(el => { el.disabled = approval; });
+    document.getElementById('runSubmitBtn').hidden = approval;
+    document.getElementById('runApproveBtn').hidden = document.getElementById('runRejectBtn').hidden = !approval;
     document.getElementById('runModalOverlay').classList.add('active');
   },
   closeExecute(){ document.getElementById('runModalOverlay').classList.remove('active'); },
   submitExecute(e){
     e.preventDefault();
+    if (this.ui.approving) return; // read-only approval view: only Approve / Reject save
     const f = e.target;
     if (!f.evidence.value.trim()){ Toast.show('Evidence wajib diisi.', 'error'); f.evidence.focus(); return; }
     const idx = App.state.testcases.findIndex(t => t.id === this.ui.executingId);
@@ -985,6 +991,8 @@ Alasan: ${a.note}` : ''}`);
     document.getElementById('tcEmptyAddBtn').addEventListener('click', () => this.openForm());
     document.getElementById('tcForm').addEventListener('submit', e => this.submitForm(e));
     document.getElementById('runForm').addEventListener('submit', e => this.submitExecute(e));
+    document.getElementById('runApproveBtn').addEventListener('click', () => this.setApproval(this.ui.executingId, 'approved'));
+    document.getElementById('runRejectBtn').addEventListener('click', () => this.setApproval(this.ui.executingId, 'rejected'));
     document.getElementById('tcTranslateFileBtn').addEventListener('click', () => this.translateActiveFile());
     document.getElementById('tcModuleTrigger').addEventListener('click', () => this.openModuleCombobox());
     document.getElementById('tcModuleTrigger').addEventListener('keydown', e => this.onModuleTriggerKey(e));
