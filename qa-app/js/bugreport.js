@@ -258,7 +258,7 @@ const BugReportModule = {
 
   // Priority SLA due date for the open form, as YYYY-MM-DDTHH:mm (local) for <input type=datetime-local>.
   autoDueDay(priority){
-    const iso = BUG_FORM.dueDate({ reportDate: this.ui.formReportDate, priority });
+    const iso = BUG_FORM.slaDue({ reportDate: this.ui.formReportDate, priority });
     if (!iso) return '';
     const d = new Date(iso), p = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -785,7 +785,7 @@ const BugReportModule = {
     this.ui.formReportDate = bug ? bug.reportDate : nowISO();
     // Legacy date-only due date = end of that day.
     const ownDue = bug && bug.dueDate ? (/^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate) ? `${bug.dueDate}T23:59` : bug.dueDate) : '';
-    f.dueDate.value = ownDue || this.autoDueDay(f.priority.value);
+    f.dueDate.value = ownDue; // empty until PM fills it (picking Priority suggests the SLA date)
     this.fillSelect(f.environment, BUG_FORM.ENVIRONMENTS, bug ? bug.environment : '', '— Pilih Environment —');
     // Bugs saved before Platform existed: infer it from Browser / Device (not written back until saved).
     const platform = bug ? (bug.platform || (bug.device && !bug.browser ? 'Mobile App' : bug.browser ? 'Web' : '')) : '';
@@ -1058,8 +1058,7 @@ const BugReportModule = {
       tester: f.tester.dataset.email || '',
       title: f.title.value.trim(), description: f.description.value.trim(), actualResult: f.actualResult.value.trim(),
       severity: f.severity.value, priority: f.priority.value, status: f.status.value,
-      // Same as the Priority SLA date -> store '' so it keeps following Priority.
-      dueDate: f.dueDate.value === this.autoDueDay(f.priority.value) ? '' : f.dueDate.value,
+      dueDate: f.dueDate.value, // set by PM only (field locked for others)
       environment: f.environment.value, buildVersion: f.buildVersion.value.trim(),
       platform: f.platform.value, os: f.os.value.trim(),
       // A new bug doesn't keep Browser / Device its platform doesn't use.
@@ -1085,6 +1084,7 @@ const BugReportModule = {
           this.logActivity(prev, prev.status, data.status, change);
         }
         Auth.logAssignment(prev, prev.assignee, data.assignee);
+        if (data.dueDate !== (prev.dueDate || '')) data.dueDateBy = data.dueDate ? Auth.currentEmail() : '';
         App.state.bugs[idx] = { ...prev, ...data };
         await App.saveBugs();
         if (wasDraft) ActivityLog.record('bugreport_create', `Bug ${bugCode(prev)} dibuat dari draft`);
@@ -1093,6 +1093,7 @@ const BugReportModule = {
         if (change) this.passLinkedTestCases([App.state.bugs[idx]]);
       } else {
         const bug = { id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), ...data, fileId: this.ui.activeFileId, reportDate: nowISO() };
+        if (bug.dueDate) bug.dueDateBy = Auth.currentEmail();
         Auth.logAssignment(bug, '', data.assignee);
         App.state.bugs.push(bug);
         const saved = await App.saveBugs();

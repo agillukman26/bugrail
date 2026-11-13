@@ -29,6 +29,16 @@ const App = {
     if (!this.state.settings.workspaces) this.state.settings.workspaces = [];
     this.ensureDefaultFile();
     this.fixDuplicateCodes();
+    this.clearLegacyDueDates();
+  },
+  /* Due Date is PM-only now (dueDateBy = who set it). Old Due Dates (no dueDateBy: auto from
+     Priority or typed by anyone before) are emptied so PM fills them again. Idempotent. */
+  clearLegacyDueDates(){
+    const old = this.state.bugs.filter(b => b.dueDate && !b.dueDateBy);
+    if (!old.length) return;
+    old.forEach(b => { b.dueDate = ''; });
+    this.saveBugs();
+    ActivityLog.record('bugreport_update', `Due Date lama dikosongkan (${old.length} bug), menunggu diisi PM`);
   },
   /* Renumbers duplicate Test Case / Bug numbers per workspace (see IdGen.dedupe).
      Runs on every load (fixes old data, idempotent) and after a file changes workspace. */

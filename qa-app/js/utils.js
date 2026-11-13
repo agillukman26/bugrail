@@ -407,16 +407,19 @@ const BUG_FORM = {
   PRIORITIES: ['Urgent', 'High', 'Medium', 'Low'],
   // Fix deadline per Priority, in days from Report Date (same table as ReportCalc.SLA_DAYS).
   SLA_DAYS: { Urgent: 1, High: 3, Medium: 7, Low: 14 },
-  /* bug.dueDate (set by PM in the form) wins: YYYY-MM-DDTHH:mm (local), or legacy
-     YYYY-MM-DD = end of that day. Empty = derived from Priority, so changing Priority
-     moves it automatically. Unknown priority counts as Medium.
-     Returns ISO string; '' without reportDate or Priority (no SLA until PM sets Priority). */
+  /* Due Date = only what PM filled in the form (bug.dueDate: YYYY-MM-DDTHH:mm local, or
+     legacy YYYY-MM-DD = end of that day), and only once Priority is set too. No Priority or
+     no Due Date = no SLA reminder. Returns ISO string or ''. */
   dueDate(bug){
-    if (bug && bug.status === 'Entry') return ''; // draft bug: SLA starts once it's reported
-    if (!bug || !bug.priority) return ''; // Priority not set yet: no due date / SLA reminder
-    if (bug && /^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
-    if (bug && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(bug.dueDate || '')) return new Date(bug.dueDate).toISOString();
-    if (!bug || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';
+    if (!bug || bug.status === 'Entry' || !bug.priority) return ''; // draft / Priority not set: no SLA
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bug.dueDate || '')) return new Date(`${bug.dueDate}T23:59:59`).toISOString();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(bug.dueDate || '')) return new Date(bug.dueDate).toISOString();
+    return '';
+  },
+  /* Suggested Due Date from the Priority SLA = reportDate + master slaHours (unknown
+     priority counts as Medium). Only pre-fills the form when PM picks Priority. */
+  slaDue(bug){
+    if (!bug || !bug.priority || !bug.reportDate || isNaN(new Date(bug.reportDate))) return '';
     // Settings > Master > Severity & Priority wins; built-in table for legacy names / outside the app.
     const lvl = typeof BUG_LEVELS !== 'undefined' && BUG_LEVELS.find('priority', bug.priority);
     const hours = (lvl && BUG_LEVELS.slaHours(lvl)) || (this.SLA_DAYS[normPriority(bug.priority)] || this.SLA_DAYS.Medium) * 24;

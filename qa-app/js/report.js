@@ -172,7 +172,7 @@ const ReportCalc = {
     const overdueOpen = [];
 
     bugs.forEach(b => {
-      if (b.status === 'Entry' || !b.priority) return; // draft / no Priority yet: no SLA
+      if (b.status === 'Entry' || !b.priority || (inApp && !BUG_FORM.dueDate(b))) return; // draft / no Priority or Due Date from PM: no SLA
       const p = prioOf(b);
       if (b.status === 'Closed'){
         const closed = (b.activity || []).filter(a => a.to === 'Closed');
