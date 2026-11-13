@@ -39,6 +39,7 @@ const Auth = {
     { key: 'testcase_read', label: 'Test Case — Lihat' },
     { key: 'testcase_update', label: 'Test Case — Edit' },
     { key: 'testcase_delete', label: 'Test Case — Hapus' },
+    { key: 'testcase_approve', label: 'Test Case — Approve/Reject hasil testing (validator)' },
     { key: 'testcase_fileShare', label: 'Test Case — Share File antar Workspace' },
     { key: 'testcase_import', label: 'Test Case — Import' },
     { key: 'testcase_export', label: 'Test Case — Export' },
@@ -64,7 +65,7 @@ const Auth = {
      goes through this matrix (see can(), hardcoded to avoid self-lockout). */
   DEFAULT_ROLE_PERMISSIONS: {
     pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_priority: true, bugreport_export: true },
-    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, testcase_import: true, testcase_export: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true, bugreport_import: true, bugreport_export: true },
+    qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_approve: true, testcase_fileShare: true, testcase_import: true, testcase_export: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true, bugreport_import: true, bugreport_export: true },
     qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_import: true, testcase_export: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true, bugreport_export: true },
     user_umum: { testcase_read: true, bugreport_read: true }
   },

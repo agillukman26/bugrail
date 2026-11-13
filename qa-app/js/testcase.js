@@ -200,6 +200,7 @@ const TestCaseModule = {
       document.getElementById('tcTableWrap').style.display = 'block';
     }
 
+    const canApprove = Auth.can('testcase_approve');
     body.innerHTML = pageRows.map(tc => `
       <tr>
         <td><input type="checkbox" class="checkbox tc-row-check" data-id="${tc.id}" ${this.ui.selected.has(tc.id) ? 'checked':''}></td>
@@ -210,6 +211,7 @@ const TestCaseModule = {
         <td class="truncate" title="${escapeHtml(tc.testCase)}">${escapeHtml(tc.testCase || '-')}</td>
         <td class="center">${tc.typeTest ? `<span class="badge type-${tc.typeTest === 'Negative' ? 'neg' : 'pos'}">${escapeHtml(tc.typeTest)}</span>` : '-'}</td>
         <td>${this.statusBadge(tc.status)}</td>
+        <td class="center">${this.approvalCell(tc.approval)}</td>
         <td>${this.evidenceCell(tc.evidence)}</td>
         <td class="col-hidden">${formatDate(tc.executionDate)}</td>
         <td class="cell-actions">
@@ -219,6 +221,8 @@ const TestCaseModule = {
               ${canUpdate ? `<button class="dropdown-item" data-act="run" data-id="${tc.id}">▶ Run</button>` : ''}
               ${canUpdate ? `<button class="dropdown-item" data-act="edit" data-id="${tc.id}">✎ Edit</button>` : ''}
               ${canCreate ? `<button class="dropdown-item" data-act="dup" data-id="${tc.id}">⧉ Duplicate</button>` : ''}
+              ${canApprove && tc.status !== 'Open' && (tc.approval || {}).result !== 'approved' ? `<button class="dropdown-item" data-act="approve" data-id="${tc.id}">✔ Approve</button>` : ''}
+              ${canApprove && tc.status !== 'Open' && (tc.approval || {}).result !== 'rejected' ? `<button class="dropdown-item" data-act="reject" data-id="${tc.id}">✖ Reject</button>` : ''}
               ${canDelete ? `<button class="dropdown-item" data-act="del" data-id="${tc.id}">🗑 Hapus</button>` : ''}
               ${tc.status === 'Failed' && canCreateBug ? `<button class="dropdown-item" data-act="bug" data-id="${tc.id}">🐞 Create Bug</button>` : ''}
             </div>
@@ -279,6 +283,36 @@ const TestCaseModule = {
   statusBadge(status){
     const map = { 'Open':'notrun', 'Passed':'passed', 'Failed':'failed', 'Blocked':'blocked', 'Retest':'retest' };
     return `<span class="badge st-${map[status]}"><span class="dot"></span>${status}</span>`;
+  },
+
+  /* Validator (testcase_approve) checks a vendor's result: tc.approval = { result:
+     'approved'|'rejected', by, at, note }. Reject needs a reason. Cleared again
+     whenever Status or Evidence changes (see clearApproval) so a re-test is re-checked. */
+  async setApproval(id, result){
+    const tc = App.state.testcases.find(t => t.id === id);
+    if (!tc || !Auth.can('testcase_approve')) return;
+    let note = '';
+    if (result === 'rejected'){
+      note = await promptDialog(`Reject ${tcCode(tc)}`, 'Alasan reject (wajib)', '', 'Reject');
+      if (!note) return;
+    }
+    tc.approval = { result, by: Auth.currentEmail(), at: nowISO(), note };
+    App.saveTestcases();
+    ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : `di-reject: ${note}`}`);
+    Toast.show(`Test case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : 'di-reject'}.`, result === 'approved' ? 'success' : 'info');
+    this.render();
+  },
+  // Status / Evidence changed after review -> approval no longer applies.
+  clearApproval(tc, status, evidence){
+    if (tc.approval && (tc.status !== status || (tc.evidence || '') !== evidence)) delete tc.approval;
+  },
+  approvalCell(a){
+    if (!a) return '-';
+    const tip = escapeHtml(`${a.result === 'approved' ? 'Approved' : 'Rejected'} oleh ${userName(a.by) || a.by} · ${formatDateTime(a.at)}${a.note ? `
+Alasan: ${a.note}` : ''}`);
+    return a.result === 'approved'
+      ? `<span title="${tip}" aria-label="Approved" style="color:var(--status-passed); font-weight:700; font-size:16px;">✓</span>`
+      : `<span title="${tip}" aria-label="Rejected" style="color:var(--status-failed); font-weight:700; font-size:16px;">✗</span>`;
   },
 
   /* Table cell: one link icon per URL in the evidence text; a note icon
@@ -360,6 +394,7 @@ const TestCaseModule = {
         if (act === 'dup') this.duplicate(id);
         if (act === 'del') this.remove(id);
         if (act === 'bug') this.createBugFromTestCase(id);
+        if (act === 'approve' || act === 'reject') this.setApproval(id, act === 'approve' ? 'approved' : 'rejected');
       };
     });
   },
@@ -598,6 +633,7 @@ const TestCaseModule = {
       if (data.status !== App.state.testcases[idx].status && data.status !== 'Open') data.lastRunAt = nowISO();
       if (data.status === 'Failed' && App.state.testcases[idx].status !== 'Failed') newlyFailed.push(this.ui.editingId);
       const evidence = { from: App.state.testcases[idx].evidence || '', to: data.evidence };
+      this.clearApproval(App.state.testcases[idx], data.status, data.evidence);
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
       ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`, evidence);
       Toast.show(`Test case ${tcCode(App.state.testcases[idx])} diperbarui.`, 'success');
@@ -681,6 +717,7 @@ const TestCaseModule = {
     const from = App.state.testcases[idx].status;
     const evidence = { from: App.state.testcases[idx].evidence || '', to: f.evidence.value.trim() };
     const id = tcCode(App.state.testcases[idx]);
+    this.clearApproval(App.state.testcases[idx], f.status.value, f.evidence.value.trim());
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
@@ -699,7 +736,7 @@ const TestCaseModule = {
     if (!Auth.can('testcase_create')) return;
     const tc = this.all().find(t => t.id === id);
     const newId = this.nextCode(tc.module, tc.fileId);
-    App.state.testcases.push({ ...tc, id: IdGen.uid('TC'), code: newId, fileId: tc.fileId, status:'Open', actualResult:'', evidence:'', executionDate:'', createdBy: Auth.currentEmail() || '', createdAt: nowISO() });
+    App.state.testcases.push({ ...tc, id: IdGen.uid('TC'), code: newId, fileId: tc.fileId, status:'Open', actualResult:'', evidence:'', executionDate:'', approval: undefined, createdBy: Auth.currentEmail() || '', createdAt: nowISO() });
     App.saveTestcases();
     this.render();
     Toast.show(`Duplikat dibuat sebagai ${newId}.`, 'success');
@@ -745,6 +782,7 @@ const TestCaseModule = {
       if (!this.ui.selected.has(t.id) || t.status === status) return;
       // Same rule as the form: no evidence, can't leave Open.
       if (status !== 'Open' && !String(t.evidence || '').trim()){ skipped++; return; }
+      this.clearApproval(t, status, t.evidence || '');
       t.status = status; changed++; moved.push(t);
       if (status !== 'Open') t.lastRunAt = nowISO();
     });
