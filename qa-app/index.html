@@ -224,6 +224,7 @@
                 <th class="sortable" data-key="testCase">Test Case <span class="arrow">↕</span></th>
                 <th class="sortable center" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
+                <th class="center">Approval</th>
                 <th class="sortable" data-key="evidence">Evidence <span class="arrow">↕</span></th>
                 <th class="sortable col-hidden" data-key="executionDate">Tgl Eksekusi <span class="arrow">↕</span></th>
                 <th>Aksi</th>
@@ -770,13 +771,15 @@
     <div class="divider"></div>
     <form id="runForm">
       <div class="field"><label>Actual Result <span class="req">*</span></label><textarea name="actualResult" required></textarea></div>
-      <div class="field"><label>Evidence <span class="req">*</span></label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti" required></textarea></div>
+      <div class="field"><label>Evidence <span class="req">*</span></label><textarea name="evidence" placeholder="Link screenshot/video, catatan bukti" required></textarea><div id="runEvidenceView" hidden style="font-size:13.5px; padding:9px 0; white-space:pre-wrap; word-break:break-word;"></div></div>
       <div class="field"><label>Status <span class="req">*</span></label>
         <select name="status" required><option>Open</option><option>Passed</option><option>Failed</option><option>Blocked</option><option>Retest</option></select>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" data-close="runModalOverlay">Batal</button>
-        <button type="submit" class="btn primary">Simpan Hasil</button>
+        <button type="submit" class="btn primary" id="runSubmitBtn">Simpan Hasil</button>
+        <button type="button" class="btn danger" id="runRejectBtn" hidden>✖ Reject</button>
+        <button type="button" class="btn primary" id="runApproveBtn" hidden>✔ Approve</button>
       </div>
     </form>
   </div>
