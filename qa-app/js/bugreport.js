@@ -378,19 +378,30 @@ const BugReportModule = {
   },
 
   /* Bug moved to Resolved -> its linked test case becomes Passed, once no other
-     bug on that test case is still open (Resolved / Closed / Rejected count as done). */
+     bug on that test case is still open (Resolved / Closed / Rejected count as done).
+     Bug moved to Closed with an attachment (QA's evidence) -> that becomes the test
+     case's Evidence too, even when the test case is already Passed. */
   passLinkedTestCases(bugs){
     const done = new Set(['RESOLVED', 'CLOSED', 'REJECTED']);
-    const passed = [];
+    const passed = [], updated = [];
     bugs.forEach(b => {
-      if (!b.testCaseId || this.statusCode(b.status) !== 'RESOLVED') return;
+      const code = this.statusCode(b.status);
+      if (!b.testCaseId || (code !== 'RESOLVED' && code !== 'CLOSED')) return;
       const tc = App.state.testcases.find(t => t.id === b.testCaseId);
-      if (!tc || tc.status === 'Passed' || passed.includes(tc)) return;
+      if (!tc || passed.includes(tc)) return;
+      // Proof of the fix: attachment given on this status change (old evidence kept if none).
+      const fix = (b.activity || []).filter(x => x.to === b.status && x.attachment).pop();
+      const last = (b.activity || []).slice(-1)[0]; // only this Closed move, not an older one
+      if (code === 'CLOSED' && last && last.to === b.status && last.attachment && last.attachment !== (tc.evidence || '')){
+        const evidence = { from: tc.evidence || '', to: last.attachment };
+        tc.evidence = last.attachment;
+        updated.push(tc);
+        ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} evidence diubah (otomatis, bug ${bugCode(b)} Closed)`, evidence);
+      }
+      if (code !== 'RESOLVED' || tc.status === 'Passed') return;
       if (!App.state.bugs.every(o => o.testCaseId !== tc.id || done.has(this.statusCode(o.status)))) return;
       const from = tc.status;
       tc.status = 'Passed';
-      // Proof of the fix: attachment given when the bug was moved to Resolved (old evidence kept if none).
-      const fix = (b.activity || []).filter(x => x.to === b.status && x.attachment).pop();
       const evidence = { from: tc.evidence || '', to: fix ? fix.attachment : tc.evidence || '' };
       tc.evidence = evidence.to;
       tc.executionDate = todayISO();
@@ -398,10 +409,9 @@ const BugReportModule = {
       passed.push(tc);
       ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} Resolved)`, evidence);
     });
-    if (passed.length){
-      App.saveTestcases();
-      Toast.show(`${passed.map(tcCode).join(', ')} otomatis menjadi Passed.`, 'info');
-    }
+    if (passed.length || updated.length) App.saveTestcases();
+    if (passed.length) Toast.show(`${passed.map(tcCode).join(', ')} otomatis menjadi Passed.`, 'info');
+    if (updated.length) Toast.show(`Evidence ${updated.map(tcCode).join(', ')} diperbarui dari bug Closed.`, 'info');
   },
 
   logActivity(bug, from, to, change = {}){
