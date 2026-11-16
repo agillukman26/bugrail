@@ -532,7 +532,7 @@ const TC_IMPORT = {
     testData: ['testdata', 'data', 'datauji'],
     expectedResult: ['expectedresult', 'expectedresults', 'expected', 'hasilyangdiharapkan', 'hasildiharapkan', 'ekspektasi'],
     typeTest: ['typetest', 'testtype', 'type', 'tipe', 'tipetest', 'jenistest'],
-    evidence: ['evidence', 'bukti'],
+    evidence: ['evidence', 'bukti', 'evidencelink', 'linkevidence', 'buktilink', 'linkbukti', 'attachment', 'attachments', 'lampiran', 'screenshot'],
     status: ['status', 'statustest', 'statuseksekusi'],
     actualResult: ['actualresult', 'actual', 'hasilaktual'],
     // Known columns that are never imported (ids are renumbered, date set on Run).

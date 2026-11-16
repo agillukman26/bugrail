@@ -764,6 +764,24 @@ const TestCaseModule = {
     setTimeout(() => draft ? BugReportModule.openForm(draft.id) : BugReportModule.openForm(null, id), 50);
   },
 
+  /* Evidence cells often show text ("Lihat bukti") with the real link only as an Excel
+     hyperlink, which sheet_to_json drops. Put the link into the cell text (Evidence column only). */
+  useEvidenceHyperlinks(ws){
+    if (!ws || !ws['!ref']) return;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let c = range.s.c; c <= range.e.c; c++){
+      const head = ws[XLSX.utils.encode_cell({ r: range.s.r, c })];
+      if (!head || TC_IMPORT.field(head.v) !== 'evidence') continue;
+      for (let r = range.s.r + 1; r <= range.e.r; r++){
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        const url = cell && cell.l && cell.l.Target;
+        if (!url || url.startsWith('#') || String(cell.v ?? '').includes(url)) continue;
+        const text = String(cell.v ?? '').trim();
+        cell.v = cell.w = text ? `${text} ${url}` : url; cell.t = 's';
+      }
+    }
+  },
+
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
     if (!Auth.can('testcase_create') || !Auth.can('testcase_import')) return;
@@ -778,6 +796,7 @@ const TestCaseModule = {
         // empty Module takes the sheet's name (unless it's a generic "Sheet1"/"Template").
         sheets = wb.SheetNames.map(name => {
           const sheetModule = /^(sheet\s*\d*|template)$/i.test(name.trim()) ? '' : name.trim();
+          this.useEvidenceHyperlinks(wb.Sheets[name]);
           return TC_IMPORT.parseSheet(name, XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' }), sheetModule, this.TYPE_TEST, this.STATUS);
         });
       }catch(err){
