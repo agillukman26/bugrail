@@ -221,7 +221,7 @@ const TestCaseModule = {
               ${canUpdate ? `<button class="dropdown-item" data-act="run" data-id="${tc.id}">▶ Run</button>` : ''}
               ${canUpdate ? `<button class="dropdown-item" data-act="edit" data-id="${tc.id}">✎ Edit</button>` : ''}
               ${canCreate ? `<button class="dropdown-item" data-act="dup" data-id="${tc.id}">⧉ Duplicate</button>` : ''}
-              ${canApprove && tc.status !== 'Open' ? `<button class="dropdown-item" data-act="approval" data-id="${tc.id}">☑ Approval</button>` : ''}
+              ${canApprove && tc.status && tc.status !== 'Open' && String(tc.evidence || '').trim() ? `<button class="dropdown-item" data-act="approval" data-id="${tc.id}">☑ Approval</button>` : ''}
               ${canDelete ? `<button class="dropdown-item" data-act="del" data-id="${tc.id}">🗑 Hapus</button>` : ''}
               ${tc.status === 'Failed' && canCreateBug ? `<button class="dropdown-item" data-act="bug" data-id="${tc.id}">🐞 Create Bug</button>` : ''}
             </div>
