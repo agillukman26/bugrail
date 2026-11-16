@@ -845,7 +845,7 @@ function listDialog(title, items, message = '', ok = false){
 }
 
 // Import outcome: three cards (same data skipped / imported / failed) + the failure reasons.
-function importResultDialog({ same, added, failed, errors = [] }){
+function importResultDialog({ same, added, failed, errors = [], updated = null }){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay confirm-modal active';
   const card = (cls, n, label) => `<div class="import-card ${cls}"><b>${n}</b><span>${label}</span></div>`;
@@ -855,6 +855,7 @@ function importResultDialog({ same, added, failed, errors = [] }){
       <h2 style="margin:0 0 12px;">Hasil Import</h2>
       <div class="import-cards">
         ${card('same', same, 'Data sama')}
+        ${updated != null ? card('ok', updated, 'Hasil testing diperbarui') : ''}
         ${card('ok', added, 'Berhasil di-import')}
         ${card('fail', failed, 'Gagal')}
       </div>
