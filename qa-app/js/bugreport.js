@@ -395,6 +395,7 @@ const BugReportModule = {
       if (code === 'CLOSED' && last && last.to === b.status && last.attachment && last.attachment !== (tc.evidence || '')){
         const evidence = { from: tc.evidence || '', to: last.attachment };
         tc.evidence = last.attachment;
+        delete tc.approval; // evidence changed -> validator must review again
         updated.push(tc);
         ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} evidence diubah (otomatis, bug ${bugCode(b)} Closed)`, evidence);
       }
@@ -436,12 +437,14 @@ const BugReportModule = {
       Toast.show('QA hanya bisa memindahkan status dari Retest ke Open, Blocked, Resolved, atau Closed.', 'error');
       return null;
     }
-    return rules.some(r => r.needNote) ? this.askStatusNote(label) : { note: '', attachment: '' };
+    // QA must give evidence (attachment) when moving a bug to Open / Closed / Rejected.
+    const attachRequired = isQA && ['OPEN', 'CLOSED', 'REJECTED'].includes(this.statusCode(to));
+    return rules.some(r => r.needNote) ? this.askStatusNote(label, attachRequired) : { note: '', attachment: '' };
   },
 
-  /* Reason (required) + optional attachment links for a status change.
+  /* Reason (required) + attachment links (required when attachRequired) for a status change.
      Resolves { note, attachment }, or null (with a toast) when cancelled. */
-  askStatusNote(label){
+  askStatusNote(label, attachRequired = false){
     return new Promise(resolve => {
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay confirm-modal status-change-modal active';
@@ -454,8 +457,9 @@ const BugReportModule = {
             <p class="combobox-error" id="statusNoteError" style="display:none;">Keterangan wajib diisi.</p>
           </div>
           <div class="field">
-            <label>Attachment <span class="text-faint">(opsional)</span></label>
+            <label>${attachRequired ? 'Evidence <span class="req">*</span>' : 'Attachment <span class="text-faint">(opsional)</span>'}</label>
             <textarea id="statusAttachInput" placeholder="Link screenshot / video / dokumen, satu per baris"></textarea>
+            <p class="combobox-error" id="statusAttachError" style="display:none;">Evidence wajib diisi.</p>
           </div>
           <div class="modal-footer">
             <button class="btn" id="statusCancelBtn">Batal</button>
@@ -473,10 +477,14 @@ const BugReportModule = {
       };
       noteEl.addEventListener('input', () => { errEl.style.display = 'none'; noteEl.classList.remove('input-invalid'); });
       overlay.querySelector('#statusCancelBtn').onclick = () => close(null);
+      const attachEl = overlay.querySelector('#statusAttachInput');
+      const attachErr = overlay.querySelector('#statusAttachError');
+      attachEl.addEventListener('input', () => { attachErr.style.display = 'none'; attachEl.classList.remove('input-invalid'); });
       overlay.querySelector('#statusOkBtn').onclick = () => {
-        const note = noteEl.value.trim();
+        const note = noteEl.value.trim(), attachment = attachEl.value.trim();
         if (!note){ errEl.style.display = 'block'; noteEl.classList.add('input-invalid'); noteEl.focus(); return; }
-        close({ note, attachment: overlay.querySelector('#statusAttachInput').value.trim() });
+        if (attachRequired && !attachment){ attachErr.style.display = 'block'; attachEl.classList.add('input-invalid'); attachEl.focus(); return; }
+        close({ note, attachment });
       };
       bindBackdropClose(overlay, () => close(null));
     });
