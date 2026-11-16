@@ -709,6 +709,10 @@ Alasan: ${a.note}` : ''}`);
     f.evidence.value = tc.evidence || '';
     f.status.value = tc.status;
     [f.actualResult, f.evidence, f.status].forEach(el => { el.disabled = approval; });
+    // Approval: Evidence as clickable links (read-only) instead of the textarea.
+    const evView = document.getElementById('runEvidenceView');
+    evView.innerHTML = approval ? (tc.evidence ? linkify(tc.evidence) : '-') : '';
+    evView.hidden = !approval; f.evidence.hidden = approval;
     document.getElementById('runSubmitBtn').hidden = approval;
     document.getElementById('runApproveBtn').hidden = document.getElementById('runRejectBtn').hidden = !approval;
     document.getElementById('runModalOverlay').classList.add('active');
