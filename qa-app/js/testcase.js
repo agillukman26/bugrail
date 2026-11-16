@@ -689,6 +689,9 @@ Alasan: ${a.note}` : ''}`);
           ${sideField('Role User', escapeHtml(tc.roleUser || '-'))}
           ${sideField('Type Test', escapeHtml(tc.typeTest || '-'))}
           ${sideField('Status', this.statusBadge(tc.status))}
+          ${tc.approval ? sideField('Approval', `<span style="color:var(--status-${tc.approval.result === 'approved' ? 'passed' : 'failed'}); font-weight:700;">${tc.approval.result === 'approved' ? '✓ Approved' : '✗ Rejected'}</span>
+            <div class="text-faint" style="font-size:12px; margin-top:2px;">oleh ${escapeHtml(userName(tc.approval.by) || '-')} · ${formatDateTime(tc.approval.at)}</div>
+            ${tc.approval.note ? `<div style="font-size:12.5px; margin-top:2px; white-space:pre-wrap;">Alasan: ${escapeHtml(tc.approval.note)}</div>` : ''}`) : ''}
           ${sideField('Execution Date', tc.executionDate ? formatDate(tc.executionDate) : '-')}
           ${sideField('Dibuat oleh', escapeHtml(tc.createdBy || '-'))}
         </div>
