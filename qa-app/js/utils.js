@@ -610,7 +610,7 @@ function normPriority(p){ return p === 'Highest' || p === 'Critical' ? 'Urgent' 
    take a bug out of Retest — to Open/Blocked/Resolved/Closed — always with a note.
    Any other move needs a note. Returns { ok, needNote }. */
 function statusTransitionRule(from, to, isQA){
-  const DEV_FLOW = ['OPEN', 'IN_PROGRESS', 'RETEST'], QA_TARGETS = ['OPEN', 'BLOCKED', 'RESOLVED', 'CLOSED'];
+  const DEV_FLOW = ['OPEN', 'IN_PROGRESS', 'RETEST'], QA_TARGETS = ['OPEN', 'BLOCKED', 'RESOLVED', 'CLOSED', 'REJECTED'];
   if (isQA) return { ok: from === 'RETEST' && QA_TARGETS.includes(to), needNote: true };
   return { ok: true, needNote: !(DEV_FLOW.includes(from) && DEV_FLOW.includes(to)) };
 }
