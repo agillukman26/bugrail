@@ -833,6 +833,30 @@ Alasan: ${a.note}` : ''}`);
     }
   },
 
+  /* Re-import of test cases already in this file: take the vendor's test result
+     (Status / Actual Result / Evidence) from the file. Never deletes or blanks
+     anything: empty cells keep the app's value, "Open" in the file never undoes a
+     result, and a non-Open status without any evidence keeps the old status.
+     Approval is cleared when Status or Evidence changes. Returns { changed, rerun (status changed) }. */
+  applyImportedResults(dupRows, existing){
+    const byKey = new Map(existing.map(t => [TC_IMPORT.dupKey(t), t]));
+    const changed = [], rerun = [];
+    dupRows.forEach(r => {
+      const tc = byKey.get(TC_IMPORT.dupKey(r));
+      if (!tc || changed.includes(tc)) return;
+      const evidence = r.evidence || tc.evidence || '';
+      const actualResult = r.actualResult || tc.actualResult || '';
+      let status = r.status && r.status !== 'Open' ? r.status : tc.status;
+      if (status !== 'Open' && !String(evidence).trim()) status = tc.status;
+      if (status === tc.status && evidence === (tc.evidence || '') && actualResult === (tc.actualResult || '')) return;
+      if (status !== tc.status || evidence !== (tc.evidence || '')) delete tc.approval;
+      if (status !== tc.status){ tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
+      Object.assign(tc, { status, evidence, actualResult });
+      changed.push(tc);
+    });
+    return { changed, rerun };
+  },
+
   /* ---- Import (Excel/CSV) ---- */
   importFile(file){
     if (!Auth.can('testcase_create') || !Auth.can('testcase_import')) return;
@@ -859,10 +883,17 @@ Alasan: ${a.note}` : ''}`);
       const failed = sheets.reduce((n, s) => n + (s.failed || 0), 0);
       const errorList = errors.slice(0, 8).concat(errors.length > 8 ? [`+${errors.length - 8} lainnya`] : []);
       // Valid rows go in; ones already in this file (or repeated in the sheet) are skipped.
-      const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows),
-        App.state.testcases.filter(t => t.fileId === this.ui.activeFileId));
+      const existing = App.state.testcases.filter(t => t.fileId === this.ui.activeFileId);
+      const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows), existing);
       if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
-      const result = { same: dup.length, added: rows.length, failed, errors: errorList };
+      const { changed: updated, rerun } = this.applyImportedResults(dup, existing);
+      const result = { same: dup.length - updated.length, updated: updated.length, added: rows.length, failed, errors: errorList };
+      if (updated.length){
+        App.saveTestcases();
+        BugReportModule.draftFromTestCases(rerun); // only test cases whose status just changed
+        ActivityLog.record('testcase_update', `${updated.length} test case hasil testingnya diperbarui dari import: ${updated.slice(0, 20).map(tcCode).join(', ')}${updated.length > 20 ? `, +${updated.length - 20} lainnya` : ''}`);
+        this.render();
+      }
       if (!rows.length){ importResultDialog(result); return; }
       const added = [];
       rows.forEach(r => {
