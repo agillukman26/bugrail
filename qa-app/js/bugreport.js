@@ -434,7 +434,7 @@ const BugReportModule = {
     const rules = bugs.filter(b => b.status !== to)
       .map(b => statusTransitionRule(this.statusCode(b.status), this.statusCode(to), isQA));
     if (rules.some(r => !r.ok)){
-      Toast.show('QA hanya bisa memindahkan status dari Retest ke Open, Blocked, Resolved, atau Closed.', 'error');
+      Toast.show('QA hanya bisa memindahkan status dari Retest ke Open, Blocked, Resolved, Closed, atau Rejected.', 'error');
       return null;
     }
     // QA must give evidence (attachment) when moving a bug to Open / Closed / Rejected.

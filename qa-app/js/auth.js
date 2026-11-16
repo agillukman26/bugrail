@@ -54,7 +54,7 @@ const Auth = {
     { key: 'bugreport_import', label: 'Bug Report — Import' },
     { key: 'bugreport_export', label: 'Bug Report — Export' },
     { key: 'bugreport_board', label: 'Bug Report — Board (drag & drop)' },
-    { key: 'bugreport_statusQA', label: 'Bug Report — Status QA (hanya dari Retest ke Open/Blocked/Resolved/Closed, wajib keterangan)' },
+    { key: 'bugreport_statusQA', label: 'Bug Report — Status QA (hanya dari Retest ke Open/Blocked/Resolved/Closed/Rejected, wajib keterangan)' },
     { key: 'master', label: 'Master — Status Bug Report, Severity & Priority' },
     { key: 'usermanagement', label: 'User Management — Daftar User' },
     { key: 'settings', label: 'Settings' }
