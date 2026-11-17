@@ -377,7 +377,7 @@ const BugReportModule = {
     this.render();
   },
 
-  /* Bug moved to Resolved -> its linked test case becomes Passed, once no other
+  /* Bug moved to Resolved or Closed -> its linked test case becomes Passed, once no other
      bug on that test case is still open (Resolved / Closed / Rejected count as done).
      Bug moved to Closed with an attachment (QA's evidence) -> that becomes the test
      case's Evidence too, even when the test case is already Passed. */
@@ -399,7 +399,7 @@ const BugReportModule = {
         updated.push(tc);
         ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} evidence diubah (otomatis, bug ${bugCode(b)} Closed)`, evidence);
       }
-      if (code !== 'RESOLVED' || tc.status === 'Passed') return;
+      if (tc.status === 'Passed') return;
       if (!App.state.bugs.every(o => o.testCaseId !== tc.id || done.has(this.statusCode(o.status)))) return;
       const from = tc.status;
       tc.status = 'Passed';
@@ -407,8 +407,9 @@ const BugReportModule = {
       tc.evidence = evidence.to;
       tc.executionDate = todayISO();
       tc.lastRunAt = nowISO();
+      delete tc.approval; // status changed -> validator must review again
       passed.push(tc);
-      ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} Resolved)`, evidence);
+      ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} ${b.status})`, evidence);
     });
     if (passed.length || updated.length) App.saveTestcases();
     if (passed.length) Toast.show(`${passed.map(tcCode).join(', ')} otomatis menjadi Passed.`, 'info');
