@@ -629,6 +629,12 @@ function compareRows(a, b, sortKey, sortDir, codeOf){
 function tcCode(t){ return (t && (t.code || t.id)) || ''; }
 // Workspace a file belongs to — the scope for per-workspace numbering (null = shared file).
 function fileWorkspace(fileId){ const f = (App.state.files || []).find(x => x.id === fileId); return (f && f.workspaceId) || null; }
+/* Approval on/off is per workspace (admin sets it on the Workspace form). Workspace of the
+   file, or the active one when no file; files without a workspace and old workspaces = on. */
+function approvalEnabled(fileId){
+  const ws = Auth.findWorkspace(fileId ? fileWorkspace(fileId) : Auth.currentWorkspaceId());
+  return !ws || ws.approval !== false;
+}
 
 const IdGen = {
   /* Next display number in a workspace = highest number still in use there + 1.

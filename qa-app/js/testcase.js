@@ -201,6 +201,8 @@ const TestCaseModule = {
     }
 
     const canApprove = Auth.can('testcase_approve');
+    const showApproval = approvalEnabled(this.ui.activeFileId);
+    document.getElementById('tcApprovalTh').hidden = !showApproval;
     body.innerHTML = pageRows.map(tc => `
       <tr>
         <td><input type="checkbox" class="checkbox tc-row-check" data-id="${tc.id}" ${this.ui.selected.has(tc.id) ? 'checked':''}></td>
@@ -211,7 +213,7 @@ const TestCaseModule = {
         <td class="truncate" title="${escapeHtml(tc.testCase)}">${escapeHtml(tc.testCase || '-')}</td>
         <td class="center">${tc.typeTest ? `<span class="badge type-${tc.typeTest === 'Negative' ? 'neg' : 'pos'}">${escapeHtml(tc.typeTest)}</span>` : '-'}</td>
         <td>${this.statusBadge(tc.status)}</td>
-        <td class="center">${this.approvalCell(tc.approval)}</td>
+        ${showApproval ? `<td class="center">${this.approvalCell(tc.approval)}</td>` : ''}
         <td>${this.evidenceCell(tc.evidence)}</td>
         <td class="col-hidden">${formatDate(tc.executionDate)}</td>
         <td class="cell-actions">
@@ -221,7 +223,7 @@ const TestCaseModule = {
               ${canUpdate ? `<button class="dropdown-item" data-act="run" data-id="${tc.id}">▶ Run</button>` : ''}
               ${canUpdate ? `<button class="dropdown-item" data-act="edit" data-id="${tc.id}">✎ Edit</button>` : ''}
               ${canCreate ? `<button class="dropdown-item" data-act="dup" data-id="${tc.id}">⧉ Duplicate</button>` : ''}
-              ${canApprove && tc.status && tc.status !== 'Open' && String(tc.evidence || '').trim() ? `<button class="dropdown-item" data-act="approval" data-id="${tc.id}">☑ Approval</button>` : ''}
+              ${canApprove && approvalEnabled(tc.fileId) && tc.status && tc.status !== 'Open' && String(tc.evidence || '').trim() ? `<button class="dropdown-item" data-act="approval" data-id="${tc.id}">☑ Approval</button>` : ''}
               ${canDelete ? `<button class="dropdown-item" data-act="del" data-id="${tc.id}">🗑 Hapus</button>` : ''}
               ${tc.status === 'Failed' && canCreateBug ? `<button class="dropdown-item" data-act="bug" data-id="${tc.id}">🐞 Create Bug</button>` : ''}
             </div>
@@ -289,7 +291,7 @@ const TestCaseModule = {
      whenever Status or Evidence changes (see clearApproval) so a re-test is re-checked. */
   async setApproval(id, result){
     const tc = App.state.testcases.find(t => t.id === id);
-    if (!tc || !Auth.can('testcase_approve')) return;
+    if (!tc || !Auth.can('testcase_approve') || !approvalEnabled(tc.fileId)) return;
     let note = '';
     if (result === 'rejected'){
       note = await promptDialog(`Reject ${tcCode(tc)}`, 'Alasan reject (wajib)', '', 'Reject');
@@ -689,7 +691,7 @@ Alasan: ${a.note}` : ''}`);
           ${sideField('Role User', escapeHtml(tc.roleUser || '-'))}
           ${sideField('Type Test', escapeHtml(tc.typeTest || '-'))}
           ${sideField('Status', this.statusBadge(tc.status))}
-          ${tc.approval ? sideField('Approval', `<span style="color:var(--status-${tc.approval.result === 'approved' ? 'passed' : 'failed'}); font-weight:700;">${tc.approval.result === 'approved' ? '✓ Approved' : '✗ Rejected'}</span>
+          ${tc.approval && approvalEnabled(tc.fileId) ? sideField('Approval', `<span style="color:var(--status-${tc.approval.result === 'approved' ? 'passed' : 'failed'}); font-weight:700;">${tc.approval.result === 'approved' ? '✓ Approved' : '✗ Rejected'}</span>
             <div class="text-faint" style="font-size:12px; margin-top:2px;">oleh ${escapeHtml(userName(tc.approval.by) || '-')} · ${formatDateTime(tc.approval.at)}</div>
             ${tc.approval.note ? `<div style="font-size:12.5px; margin-top:2px; white-space:pre-wrap;">Alasan: ${escapeHtml(tc.approval.note)}</div>` : ''}`) : ''}
           ${sideField('Execution Date', tc.executionDate ? formatDate(tc.executionDate) : '-')}

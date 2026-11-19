@@ -224,7 +224,7 @@
                 <th class="sortable" data-key="testCase">Test Case <span class="arrow">↕</span></th>
                 <th class="sortable center" data-key="typeTest">Type Test <span class="arrow">↕</span></th>
                 <th class="sortable" data-key="status">Status <span class="arrow">↕</span></th>
-                <th class="center">Approval</th>
+                <th class="center" id="tcApprovalTh">Approval</th>
                 <th class="sortable" data-key="evidence">Evidence <span class="arrow">↕</span></th>
                 <th class="sortable col-hidden" data-key="executionDate">Tgl Eksekusi <span class="arrow">↕</span></th>
                 <th>Aksi</th>
@@ -1033,6 +1033,7 @@
       <button class="close-x" data-close="workspaceFormModalOverlay">✕</button>
     </div>
     <div class="field"><label>Nama Workspace</label><input type="text" id="workspaceFormName" placeholder="Contoh: Tim Mobile"></div>
+    <label style="display:flex; gap:8px; align-items:center; font-size:13px; margin-top:8px;"><input type="checkbox" id="workspaceFormApproval"> Aktifkan Approval Test Case <span class="text-faint">(kolom & aksi Approval)</span></label>
     <div class="modal-footer">
       <button type="button" class="btn" data-close="workspaceFormModalOverlay">Batal</button>
       <button type="button" class="btn primary" id="workspaceFormSaveBtn">Simpan</button>
@@ -1087,13 +1088,13 @@
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div><span class="text-faint">Memuat aplikasi...</span></div>
 
 <!-- ============ SCRIPTS (order matters: utils/app first, feature modules after) ============ -->
-<script src="js/utils.js?v=60"></script>
+<script src="js/utils.js?v=61"></script>
 <script src="js/app.js?v=46"></script>
 <script src="js/activitylog.js?v=9"></script>
 <script src="js/workspace.js?v=5"></script>
-<script src="js/auth.js?v=30"></script>
+<script src="js/auth.js?v=31"></script>
 <script src="js/dashboard.js?v=20"></script>
-<script src="js/testcase.js?v=66"></script>
+<script src="js/testcase.js?v=67"></script>
 <script src="js/testforge.js?v=4"></script>
 <script src="js/bugreport.js?v=92"></script>
 <script src="js/summary.js?v=23"></script>
@@ -1104,7 +1105,7 @@
 <script src="js/settings.js?v=16"></script>
 <script src="js/masterstatus.js?v=16"></script>
 <script src="js/masterlevel.js?v=4"></script>
-<script src="js/usermanagement.js?v=21"></script>
+<script src="js/usermanagement.js?v=22"></script>
 <script>
   // Generic modal close (X button / Cancel buttons) + quick-add wiring.
   document.querySelectorAll('[data-close]').forEach(btn => {

@@ -92,20 +92,21 @@ const Auth = {
   workspaces(){ return App.state.settings.workspaces || []; },
   findWorkspace(id){ return this.workspaces().find(w => w.id === id) || null; },
 
-  addWorkspace(name){
+  addWorkspace(name, approval = true){
     if (!name || !name.trim()) return { ok: false, error: 'Nama workspace wajib diisi.' };
     const id = 'WS-' + Date.now();
     App.state.settings.workspaces = this.workspaces();
-    App.state.settings.workspaces.push({ id, name: name.trim() });
+    App.state.settings.workspaces.push({ id, name: name.trim(), approval });
     App.saveSettings();
     return { ok: true, id };
   },
 
-  updateWorkspace(id, name){
+  updateWorkspace(id, name, approval = true){
     const ws = this.findWorkspace(id);
     if (!ws) return { ok: false, error: 'Workspace tidak ditemukan.' };
     if (!name || !name.trim()) return { ok: false, error: 'Nama workspace wajib diisi.' };
     ws.name = name.trim();
+    ws.approval = approval;
     App.saveSettings();
     return { ok: true };
   },

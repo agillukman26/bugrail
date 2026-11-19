@@ -358,6 +358,7 @@ const UserManagementModule = {
     this.workspaceEditingId = null;
     document.getElementById('workspaceFormTitle').textContent = 'Tambah Workspace';
     document.getElementById('workspaceFormName').value = '';
+    document.getElementById('workspaceFormApproval').checked = true;
   },
 
   startCreateWorkspace(){
@@ -371,15 +372,17 @@ const UserManagementModule = {
     this.workspaceEditingId = id;
     document.getElementById('workspaceFormTitle').textContent = 'Edit Workspace';
     document.getElementById('workspaceFormName').value = ws.name;
+    document.getElementById('workspaceFormApproval').checked = ws.approval !== false;
     this.openWorkspaceModal();
   },
 
   saveWorkspace(){
     const name = document.getElementById('workspaceFormName').value;
+    const approval = document.getElementById('workspaceFormApproval').checked;
     const wasEditing = !!this.workspaceEditingId;
     const result = this.workspaceEditingId
-      ? Auth.updateWorkspace(this.workspaceEditingId, name)
-      : Auth.addWorkspace(name);
+      ? Auth.updateWorkspace(this.workspaceEditingId, name, approval)
+      : Auth.addWorkspace(name, approval);
     if (!result.ok){ Toast.show(result.error, 'error'); return; }
     ActivityLog.record(wasEditing ? 'workspace_update' : 'workspace_create', `Workspace "${name}" ${wasEditing ? 'diperbarui' : 'dibuat'}`);
     Toast.show(wasEditing ? 'Workspace diperbarui.' : 'Workspace dibuat.', 'success');
