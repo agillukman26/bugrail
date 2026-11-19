@@ -1106,6 +1106,8 @@ a.evidence-icon:hover{ background:var(--primary-soft); }
 .notif-panel{width:min(400px, calc(100vw - 32px));}
 .notif-item{display:flex; gap:10px; padding:9px 10px; border-radius:var(--radius-s); cursor:pointer; font-size:13px;}
 .notif-item:hover{background:var(--primary-soft);}
+.notif-item.reject:hover{background:color-mix(in srgb, var(--status-failed) 14%, transparent);}
+.notif-item.reject:hover .notif-head b, .notif-item.reject:hover .notif-text{color:var(--status-failed);}
 .notif-item.unread{background:color-mix(in srgb, var(--primary) 7%, transparent);}
 .notif-item.unread .notif-text{color:var(--text); font-weight:600;}
 .notif-body{flex:1; min-width:0;}

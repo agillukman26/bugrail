@@ -4,7 +4,8 @@
    there's no separate notification store. Bugs: only the creator and
    the assignee, never for their own action. Test cases: a per-file
    "not run yet" reminder for the person who created/uploaded them, and a
-   per-file "draft bug to finish" reminder for the tester of auto-made drafts.
+   per-file "draft bug to finish" reminder for the tester of auto-made drafts,
+   and Approved/Rejected for whoever last ran the test case (tc.executedBy).
    NotifCalc is pure (no DOM) — see qa-app/test/notifications.check.js.
    ========================================================== */
 
@@ -19,7 +20,7 @@ const NotifCalc = {
   // Each event: { at, icon, head ("Bug Baru"...), text, target, note }.
   /* Reminders carry `at` = newest item's time, or today's 00:00 once it's older: they show
      as unread again once a day (and when a new item joins), not on every bell open. */
-  build({ bugs = [], testcases = [], me, canBug = true, canTc = true, overdueAt = () => '', isHigh = () => false, now = new Date() }){
+  build({ bugs = [], testcases = [], me, canBug = true, canTc = true, overdueAt = () => '', isHigh = () => false, approvalOn = () => true, now = new Date() }){
     const norm = e => String(e || '').trim().toLowerCase();
     const name = e => String(e || '').split('@')[0]; // login name, same as userName()
     me = norm(me);
@@ -69,6 +70,16 @@ const NotifCalc = {
       });
     });
 
+    if (canTc) testcases.forEach(t => {
+      const a = t.approval;
+      if (!a || norm(t.executedBy) !== me || norm(a.by) === me || !approvalOn(t)) return;
+      const ok = a.result === 'approved';
+      events.push({ at: a.at, icon: ok ? '✅' : '❌', reject: !ok, note: a.note || '',
+        target: { type: 'testcase', id: t.id, fileId: t.fileId },
+        head: ok ? 'Test Case Approved' : 'Test Case Rejected',
+        text: `Test Case ${t.code || t.id} telah di-${ok ? 'approve' : 'reject'} oleh ${name(a.by)}${t.testCase ? `: ${t.testCase}` : ''}` });
+    });
+
     events.sort((a, b) => new Date(b.at) - new Date(a.at));
 
     // Reminder for whoever created / uploaded (imported) the test cases: one
@@ -114,7 +125,8 @@ const NotificationCenter = {
       bugs: BugReportModule.all(), testcases: TestCaseModule.all(), me: Auth.currentEmail(),
       canBug: Auth.can('bugreport_read'), canTc: Auth.can('testcase_read'),
       overdueAt: b => (BUG_FORM.isOverdue(b) ? BUG_FORM.dueDate(b) : ''),
-      isHigh: b => BUG_LEVELS.names('priority').slice(0, 2).includes(b.priority) // e.g. Urgent, High
+      isHigh: b => BUG_LEVELS.names('priority').slice(0, 2).includes(b.priority), // e.g. Urgent, High
+      approvalOn: t => approvalEnabled(t.fileId)
     });
   },
 
@@ -133,8 +145,8 @@ const NotificationCenter = {
     const seen = this.lastSeen();
     const fileName = id => (App.state.files.find(f => f.id === id) || { name: 'Tanpa File' }).name;
     // Title + file on top, one-line text below (cut with "…", full text on hover).
-    const item = ({ unread, attrs, icon, head, fileId, text, note, at }) => `
-        <div class="notif-item ${unread ? 'unread' : ''}" ${attrs}>
+    const item = ({ unread, reject, attrs, icon, head, fileId, text, note, at }) => `
+        <div class="notif-item ${unread ? 'unread' : ''} ${reject ? 'reject' : ''}" ${attrs}>
           <span class="notif-icon">${icon}</span>
           <div class="notif-body">
             <div class="notif-head"><b>${escapeHtml(head)}</b><span class="notif-file" title="${escapeHtml(fileName(fileId))}">${escapeHtml(fileName(fileId))}</span></div>
@@ -167,6 +179,10 @@ const NotificationCenter = {
     } else if (kind === 'draft'){
       App.goTo('bugreport'); // the file's list, drafts show as "Entry"
       if (file) BugReportModule.openFile(file);
+    } else if (kind === 'testcase'){
+      App.goTo('testcase');
+      if (file) TestCaseModule.openFile(file);
+      TestCaseModule.openDetail(id);
     } else {
       App.goTo('testcase');
       if (file) TestCaseModule.openFile(file); // reminder: open that file's test cases

@@ -738,6 +738,7 @@ Alasan: ${a.note}` : ''}`);
     App.state.testcases[idx].status = f.status.value;
     App.state.testcases[idx].executionDate = todayISO();
     App.state.testcases[idx].lastRunAt = nowISO();
+    App.state.testcases[idx].executedBy = Auth.currentEmail() || ''; // gets the Approve/Reject notification
     App.saveTestcases();
     if (from !== f.status.value) ActivityLog.record('testcase_update', `Test Case ${id} status diubah dari ${from} ke ${f.status.value} (Run)`, evidence);
     else if (evidence.from !== evidence.to) ActivityLog.record('testcase_update', `Test Case ${id} evidence diubah (Run)`, evidence);
@@ -799,7 +800,7 @@ Alasan: ${a.note}` : ''}`);
       if (status !== 'Open' && !String(t.evidence || '').trim()){ skipped++; return; }
       this.clearApproval(t, status, t.evidence || '');
       t.status = status; changed++; moved.push(t);
-      if (status !== 'Open') t.lastRunAt = nowISO();
+      if (status !== 'Open'){ t.lastRunAt = nowISO(); t.executedBy = Auth.currentEmail() || ''; }
     });
     App.saveTestcases();
     BugReportModule.draftFromTestCases(moved);
@@ -889,6 +890,7 @@ Alasan: ${a.note}` : ''}`);
       const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows), existing);
       if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
       const { changed: updated, rerun } = this.applyImportedResults(dup, existing);
+      rerun.forEach(t => { t.executedBy = Auth.currentEmail() || ''; });
       const result = { same: dup.length - updated.length, updated: updated.length, added: rows.length, failed, errors: errorList };
       if (updated.length){
         App.saveTestcases();
