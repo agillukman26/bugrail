@@ -389,13 +389,13 @@ const BugReportModule = {
       if (!b.testCaseId || (code !== 'RESOLVED' && code !== 'CLOSED')) return;
       const tc = App.state.testcases.find(t => t.id === b.testCaseId);
       if (!tc || passed.includes(tc)) return;
+      const evidenceBefore = tc.evidence || ''; // the Closed block below may already swap it
       // Proof of the fix: attachment given on this status change (old evidence kept if none).
       const fix = (b.activity || []).filter(x => x.to === b.status && x.attachment).pop();
       const last = (b.activity || []).slice(-1)[0]; // only this Closed move, not an older one
       if (code === 'CLOSED' && last && last.to === b.status && last.attachment && last.attachment !== (tc.evidence || '')){
         const evidence = { from: tc.evidence || '', to: last.attachment };
         tc.evidence = last.attachment;
-        delete tc.approval; // evidence changed -> validator must review again
         updated.push(tc);
         ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} evidence diubah (otomatis, bug ${bugCode(b)} Closed)`, evidence);
       }
@@ -407,7 +407,7 @@ const BugReportModule = {
       tc.evidence = evidence.to;
       tc.executionDate = todayISO();
       tc.lastRunAt = nowISO();
-      delete tc.approval; // status changed -> validator must review again
+      if (evidenceBefore !== evidence.to) delete tc.approval; // status AND evidence changed -> validator must review again
       passed.push(tc);
       ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} status diubah dari ${from} ke Passed (otomatis, bug ${bugCode(b)} ${b.status})`, evidence);
     });
