@@ -290,8 +290,8 @@ const TestCaseModule = {
   },
 
   /* Validator (testcase_approve) checks a vendor's result: tc.approval = { result:
-     'approved'|'rejected', by, at, note }. Reject needs a reason. Cleared only
-     when Status AND Evidence both change (see clearApproval) = a real re-test, re-checked. */
+     'approved'|'rejected', by, at, note }. Reject needs a reason. Never cleared
+     by a re-run / edit: it stays as history until the validator approves/rejects again. */
   async setApproval(id, result){
     const tc = App.state.testcases.find(t => t.id === id);
     if (!tc || !Auth.can('testcase_approve') || !approvalEnabled(tc.fileId)) return;
@@ -306,10 +306,6 @@ const TestCaseModule = {
     ActivityLog.record('testcase_update', `Test Case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : `di-reject: ${note}`}`);
     Toast.show(`Test case ${tcCode(tc)} ${result === 'approved' ? 'di-approve' : 'di-reject'}.`, result === 'approved' ? 'success' : 'info');
     this.render();
-  },
-  // Status AND Evidence both changed after review (a re-test) -> approval no longer applies.
-  clearApproval(tc, status, evidence){
-    if (tc.approval && tc.status !== status && (tc.evidence || '') !== evidence) delete tc.approval;
   },
   approvalCell(a){
     if (!a) return '-';
@@ -639,7 +635,6 @@ Alasan: ${a.note}` : ''}`);
       if (data.status !== App.state.testcases[idx].status && data.status !== 'Open') data.lastRunAt = nowISO();
       if (data.status === 'Failed' && App.state.testcases[idx].status !== 'Failed') newlyFailed.push(this.ui.editingId);
       const evidence = { from: App.state.testcases[idx].evidence || '', to: data.evidence };
-      this.clearApproval(App.state.testcases[idx], data.status, data.evidence);
       App.state.testcases[idx] = { ...App.state.testcases[idx], ...data };
       ActivityLog.record('testcase_update', `Test Case ${tcCode(App.state.testcases[idx])} diperbarui`, evidence);
       Toast.show(`Test case ${tcCode(App.state.testcases[idx])} diperbarui.`, 'success');
@@ -736,7 +731,6 @@ Alasan: ${a.note}` : ''}`);
     const from = App.state.testcases[idx].status;
     const evidence = { from: App.state.testcases[idx].evidence || '', to: f.evidence.value.trim() };
     const id = tcCode(App.state.testcases[idx]);
-    this.clearApproval(App.state.testcases[idx], f.status.value, f.evidence.value.trim());
     App.state.testcases[idx].actualResult = f.actualResult.value.trim();
     App.state.testcases[idx].evidence = f.evidence.value.trim();
     App.state.testcases[idx].status = f.status.value;
@@ -802,7 +796,6 @@ Alasan: ${a.note}` : ''}`);
       if (!this.ui.selected.has(t.id) || t.status === status) return;
       // Same rule as the form: no evidence, can't leave Open.
       if (status !== 'Open' && !String(t.evidence || '').trim()){ skipped++; return; }
-      this.clearApproval(t, status, t.evidence || '');
       t.status = status; changed++; moved.push(t);
       if (status !== 'Open'){ t.lastRunAt = nowISO(); t.executedBy = Auth.currentEmail() || ''; }
     });
@@ -843,8 +836,7 @@ Alasan: ${a.note}` : ''}`);
   /* Re-import of test cases already in this file: take the vendor's test result
      (Status / Actual Result / Evidence) from the file. Never deletes or blanks
      anything: empty cells keep the app's value, "Open" in the file never undoes a
-     result, and a non-Open status without any evidence keeps the old status.
-     Approval is cleared when Status and Evidence both change. Returns { changed, rerun (status changed) }. */
+     result, and a non-Open status without any evidence keeps the old status. Returns { changed, rerun (status changed) }. */
   applyImportedResults(dupRows, existing){
     const byKey = new Map(existing.map(t => [TC_IMPORT.dupKey(t), t]));
     const changed = [], rerun = [];
@@ -856,7 +848,6 @@ Alasan: ${a.note}` : ''}`);
       let status = r.status && r.status !== 'Open' ? r.status : tc.status;
       if (status !== 'Open' && !String(evidence).trim()) status = tc.status;
       if (status === tc.status && evidence === (tc.evidence || '') && actualResult === (tc.actualResult || '')) return;
-      this.clearApproval(tc, status, evidence);
       if (status !== tc.status){ tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
       Object.assign(tc, { status, evidence, actualResult });
       changed.push(tc);
