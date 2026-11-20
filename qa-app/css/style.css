@@ -683,6 +683,7 @@ table.data-table th.center, table.data-table td.center{text-align:center;}
 .dropdown-panel .filter-select{width:100%;}
 .dropdown-panel.filter-panel{min-width:230px; gap:12px;}
 .filter-field{display:flex; flex-direction:column; gap:5px;}
+.filter-field[hidden]{display:none;}
 .filter-field label{font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em;}
 .filter-panel-footer{border-top:1px solid var(--border); margin-top:2px; padding-top:10px;}
 .filter-panel-footer .btn{width:100%; justify-content:center;}

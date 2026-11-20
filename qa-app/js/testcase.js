@@ -26,7 +26,7 @@ const TestCaseModule = {
 
   ui: {
     search: '',
-    filters: { module:'', typeTest:'', status:'' },
+    filters: { module:'', typeTest:'', status:'', approval:'' },
     sortKey: '', sortDir: 'asc', // '' = stored order (creation / import sheet order) until a header is clicked
     page: 1, pageSize: 10,
     selected: new Set(),
@@ -130,6 +130,8 @@ const TestCaseModule = {
       if (filters.module && tc.module !== filters.module) return false;
       if (filters.typeTest && tc.typeTest !== filters.typeTest) return false;
       if (filters.status && tc.status !== filters.status) return false;
+      // approval filter only counts while its field is shown (approval on for the workspace)
+      if (filters.approval && approvalEnabled(activeFileId) && (tc.approval ? tc.approval.result : 'none') !== filters.approval) return false;
       return true;
     });
     if (sortKey) rows.sort((a, b) => compareRows(a, b, sortKey, sortDir, tcCode));
@@ -203,6 +205,7 @@ const TestCaseModule = {
     const canApprove = Auth.can('testcase_approve');
     const showApproval = approvalEnabled(this.ui.activeFileId);
     document.getElementById('tcApprovalTh').hidden = !showApproval;
+    document.getElementById('tcFilterApprovalField').hidden = !showApproval;
     body.innerHTML = pageRows.map(tc => `
       <tr>
         <td><input type="checkbox" class="checkbox tc-row-check" data-id="${tc.id}" ${this.ui.selected.has(tc.id) ? 'checked':''}></td>
@@ -340,10 +343,11 @@ Alasan: ${a.note}` : ''}`);
   },
 
   resetFilters(){
-    this.ui.filters = { module:'', typeTest:'', status:'' };
+    this.ui.filters = { module:'', typeTest:'', status:'', approval:'' };
     this.ui.page = 1;
     document.getElementById('tcFilterTypeTest').value = '';
     document.getElementById('tcFilterStatus').value = '';
+    document.getElementById('tcFilterApproval').value = '';
     this.render();
   },
 
@@ -1067,9 +1071,9 @@ Alasan: ${a.note}` : ''}`);
       this.render();
     });
     searchableSelect(document.getElementById('tcFilterModule'), 'Cari module...');
-    ['tcFilterModule','tcFilterTypeTest','tcFilterStatus'].forEach(id => {
+    ['tcFilterModule','tcFilterTypeTest','tcFilterStatus','tcFilterApproval'].forEach(id => {
       document.getElementById(id).addEventListener('change', e => {
-        const map = { tcFilterModule:'module', tcFilterTypeTest:'typeTest', tcFilterStatus:'status' };
+        const map = { tcFilterModule:'module', tcFilterTypeTest:'typeTest', tcFilterStatus:'status', tcFilterApproval:'approval' };
         this.ui.filters[map[id]] = e.target.value; this.ui.page = 1; this.render();
       });
     });
