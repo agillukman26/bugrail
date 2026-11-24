@@ -419,6 +419,10 @@ const BugReportModule = {
     bug.activity.push({ at: nowISO(), from, to, note: change.note, attachment: change.attachment || '', email: Auth.currentEmail() || 'unknown' });
   },
 
+  // Moving a bug to Closed needs permission bugreport_close (admin always can).
+  closeDenied(to){ return this.statusCode(to) === 'CLOSED' && !Auth.can('bugreport_close'); },
+  CLOSE_DENIED_MSG: 'Anda tidak punya izin menutup bug (status Closed).',
+
   // Status name -> master code (OPEN, IN_PROGRESS, RETEST...); unknown names normalised the same way.
   statusCode(name){
     const m = this.statusMaster().find(s => s.name === name);
@@ -429,6 +433,10 @@ const BugReportModule = {
      (utils.js) and asks for a note only when a move needs one.
      Resolves { note, attachment }, or null (with a toast) when blocked/cancelled. */
   async confirmStatusChange(bugs, to, label){
+    if (bugs.some(b => b.status !== to) && this.closeDenied(to)){
+      Toast.show(this.CLOSE_DENIED_MSG, 'error');
+      return null;
+    }
     const isQA = !Auth.isAdmin() && Auth.can('bugreport_statusQA');
     const rules = bugs.filter(b => b.status !== to)
       .map(b => statusTransitionRule(this.statusCode(b.status), this.statusCode(to), isQA));
@@ -1086,6 +1094,7 @@ const BugReportModule = {
     };
     const errors = this.ui.limitedEdit ? {} : BUG_FORM.errors({ ...data, steps: f.stepsRef.value }, creating || wasDraft);
     if (Object.keys(errors).length){ this.showFormErrors(errors); return; }
+    if ((creating || wasDraft) && this.closeDenied(data.status)){ Toast.show(this.CLOSE_DENIED_MSG, 'error'); return; }
 
     const btn = document.getElementById('bugFormSubmitBtn');
     this.ui.saving = true; btn.disabled = true; btn.textContent = 'Menyimpan…';
@@ -1279,7 +1288,7 @@ const BugReportModule = {
             if (sameAsTc(ownSteps, stepsHtmlToText(tc ? tc.steps || '' : ''))) ownSteps = '';
             if (sameAsTc(ownExpected, tc && tc.expectedResult)) ownExpected = '';
             const statuses = this.STATUS;
-            const status = statuses.includes(r.Status || r.status) ? (r.Status || r.status) : (statuses[0] || 'Open');
+            const status = statuses.includes(r.Status || r.status) && !this.closeDenied(r.Status || r.status) ? (r.Status || r.status) : (statuses[0] || 'Open');
             const bug = {
               id: IdGen.uid('BUG'), code: this.nextCode(this.ui.activeFileId), testCaseId,
               module: String(r.Module || r.module || (tc && tc.module) || sheetModule).trim(),

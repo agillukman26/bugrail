@@ -5,8 +5,8 @@ const scrypt = promisify(crypto.scrypt);
 // Copy of DEFAULT_ROLE_PERMISSIONS in qa-app/js/auth.js — keep in sync.
 const DEFAULT_ROLE_PERMISSIONS = {
   pm_ba: { dashboard: true, summary: true, report: true, bugreport_read: true, bugreport_updateStatusPriority: true },
-  qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true },
-  qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true },
+  qa_internal: { testcase_create: true, testcase_read: true, testcase_update: true, testcase_fileShare: true, bugreport_fileCreate: true, bugreport_create: true, bugreport_read: true, bugreport_update: true, bugreport_statusQA: true, bugreport_close: true },
+  qa_vendor: { testcase_create: true, testcase_read: true, testcase_update: true, bugreport_read: true, bugreport_update: true, bugreport_board: true, bugreport_statusQA: true, bugreport_close: true },
   user_umum: { testcase_read: true, bugreport_read: true }
 };
 
