@@ -588,6 +588,9 @@ table.data-table th.center, table.data-table td.center{text-align:center;}
 .bug-summary-grid > *{min-width:0;}
 @media (max-width:1100px){.bug-summary-grid{grid-template-columns:1fr 1fr;}}
 @media (max-width:760px){.bug-summary-grid{grid-template-columns:1fr;}}
+.approval-summary-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch;}
+.approval-summary-grid > *{min-width:0;}
+@media (max-width:1100px){.approval-summary-grid{grid-template-columns:1fr;}}
 .sum-card{
   background:var(--card-bg, var(--surface-alt)); border:1px solid var(--card-border, var(--border));
   border-radius:var(--radius-m); padding:14px 16px; display:flex; flex-direction:column; gap:10px;
