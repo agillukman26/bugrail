@@ -833,23 +833,29 @@ Alasan: ${a.note}` : ''}`);
     }
   },
 
-  /* Re-import of test cases already in this file: take the vendor's test result
-     (Status / Actual Result / Evidence) from the file. Never deletes or blanks
+  /* Re-import of test cases already in this file (same Module + Scenario + Test Case):
+     update them from the file instead of adding a copy. Never deletes or blanks
      anything: empty cells keep the app's value, "Open" in the file never undoes a
      result, and a non-Open status without any evidence keeps the old status. Returns { changed, rerun (status changed) }. */
+  IMPORT_UPDATE_FIELDS: ['roleUser', 'preconditions', 'testData', 'expectedResult', 'typeTest', 'actualResult', 'evidence'],
   applyImportedResults(dupRows, existing){
     const byKey = new Map(existing.map(t => [TC_IMPORT.dupKey(t), t]));
     const changed = [], rerun = [];
     dupRows.forEach(r => {
       const tc = byKey.get(TC_IMPORT.dupKey(r));
       if (!tc || changed.includes(tc)) return;
-      const evidence = r.evidence || tc.evidence || '';
-      const actualResult = r.actualResult || tc.actualResult || '';
+      // Excel line breaks (\r\n) and spaces at line ends don't count as an edit.
+      const same = (a, b) => String(a ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim() === String(b ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim();
+      const next = {};
+      this.IMPORT_UPDATE_FIELDS.forEach(k => { if (r[k] && !same(r[k], tc[k])) next[k] = r[k]; });
+      // Steps are stored as HTML: compare as text so an unchanged export doesn't count as an edit.
+      if (r.steps && !same(r.steps, stepsHtmlToText(tc.steps || ''))) next.steps = textToStepsHtml(r.steps);
+      const evidence = next.evidence || tc.evidence || '';
       let status = r.status && r.status !== 'Open' ? r.status : tc.status;
       if (status !== 'Open' && !String(evidence).trim()) status = tc.status;
-      if (status === tc.status && evidence === (tc.evidence || '') && actualResult === (tc.actualResult || '')) return;
-      if (status !== tc.status){ tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
-      Object.assign(tc, { status, evidence, actualResult });
+      if (status !== tc.status){ next.status = status; tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
+      if (!Object.keys(next).length) return;
+      Object.assign(tc, next);
       changed.push(tc);
     });
     return { changed, rerun };
@@ -890,7 +896,7 @@ Alasan: ${a.note}` : ''}`);
       if (updated.length){
         App.saveTestcases();
         BugReportModule.draftFromTestCases(rerun); // only test cases whose status just changed
-        ActivityLog.record('testcase_update', `${updated.length} test case hasil testingnya diperbarui dari import: ${updated.slice(0, 20).map(tcCode).join(', ')}${updated.length > 20 ? `, +${updated.length - 20} lainnya` : ''}`);
+        ActivityLog.record('testcase_update', `${updated.length} test case diperbarui dari import: ${updated.slice(0, 20).map(tcCode).join(', ')}${updated.length > 20 ? `, +${updated.length - 20} lainnya` : ''}`);
         this.render();
       }
       if (!rows.length){ importResultDialog(result); return; }
