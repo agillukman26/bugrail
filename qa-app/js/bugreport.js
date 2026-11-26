@@ -1389,7 +1389,7 @@ const BugReportModule = {
     { label:'Attachment', key:'attachments', width:30 }
   ],
 
-  TEMPLATE_FROM_TC_KEYS: ['testCaseId', 'module', 'scenario', 'actualResult', 'title', 'severity', 'priority', 'assignee'],
+  TEMPLATE_FROM_TC_KEYS: ['testCaseId', 'module', 'scenario', 'actualResult', 'title', 'severity', 'priority', 'assignee', 'attachments'],
 
   async downloadImportTemplate(){
     const formOptions = name => [...document.querySelectorAll(`#bugForm [name="${name}"] option`)].map(o => o.value).filter(Boolean);
@@ -1422,7 +1422,9 @@ const BugReportModule = {
     const rows = failed.length ? failed.map(t => ({
       testCaseId: tcCode(t), module: t.module || '', scenario: t.scenario || '', steps: stepsHtmlToText(t.steps || ''),
       expectedResult: t.expectedResult || '', tester: Auth.currentEmail() || '', actualResult: t.actualResult || '', title: '',
-      severity: 'Medium', priority: 'Medium', status: lists.status[0] || 'Open'
+      severity: 'Medium', priority: 'Medium', status: lists.status[0] || 'Open',
+      // Test case evidence pre-filled like the form (URLs only) — the tester just adds more.
+      attachments: (String(t.evidence || '').match(/https?:\/\/[^\s<>"']+/g) || []).join('\n')
     })) : [sample];
 
     // One sheet per module (first-seen order, like the Test Case export); the sample stays one "Template" sheet.
