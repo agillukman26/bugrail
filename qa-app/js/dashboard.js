@@ -6,6 +6,20 @@
 
 const Dashboard = {
   charts: {},
+  APPROVAL_COLORS: ['#1E9E6B', '#D64550', '#E0A526'], // Approved, Rejected, Belum di-Approval
+
+  /* 'approved' | 'rejected' | 'pending' (executed w/ evidence, not yet validated) | null (not approvable yet) */
+  approvalState(tc){
+    if (tc.approval) return tc.approval.result;
+    return tc.status && tc.status !== 'Open' && String(tc.evidence || '').trim() ? 'pending' : null;
+  },
+
+  approvalStats(tcs){
+    const c = { approved:0, rejected:0, pending:0 };
+    tcs.forEach(tc => { const st = this.approvalState(tc); if (st in c) c[st]++; });
+    c.total = c.approved + c.rejected + c.pending;
+    return c;
+  },
 
   computeStats(tcs, bugs){
     const count = (arr, key, val) => arr.filter(x => x[key] === val).length;
@@ -30,6 +44,9 @@ const Dashboard = {
     const resStats = computeBugResolutionStats(bugs);
     const passRate = s.totalTC ? Math.round((s.passed/s.totalTC)*100) : 0;
     const pct = (n) => s.totalTC ? Math.round((n/s.totalTC)*1000)/10 : 0;
+    const showApproval = approvalEnabled();
+    const a = this.approvalStats(tcs);
+    const aPct = (n) => a.total ? Math.round((n/a.total)*1000)/10 : 0;
 
     document.getElementById('dashBody').innerHTML = `
       <div class="sum-section">
@@ -55,6 +72,20 @@ const Dashboard = {
           <div class="sum-overall-sub">${s.passed} / ${s.totalTC} Passed</div>
         </div>
       </div>
+
+      ${showApproval ? `<div class="sum-section">
+        <div class="sum-section-head"><span class="icon">☑️</span><h2 style="color:var(--status-passed);">APPROVAL SUMMARY</h2></div>
+        <p class="sum-hint">Dari ${a.total} test case yang sudah dijalankan dan ber-evidence</p>
+        <div class="approval-summary-grid">
+          <div class="sum-card-grid">
+            ${this.sumCard('✅','Approved', a.approved, `${aPct(a.approved)}% dari test case siap approval`, aPct(a.approved), this.APPROVAL_COLORS[0])}
+            ${this.sumCard('❌','Rejected', a.rejected, `${aPct(a.rejected)}% dari test case siap approval`, aPct(a.rejected), this.APPROVAL_COLORS[1])}
+            ${this.sumCard('⏳','Belum di-Approval', a.pending, `${aPct(a.pending)}% dari test case siap approval`, aPct(a.pending), this.APPROVAL_COLORS[2])}
+          </div>
+          ${this.donutCard('Distribusi Approval', a.total, 'Siap Approval',
+            ['Approved','Rejected','Belum di-Approval'], [a.approved, a.rejected, a.pending], this.APPROVAL_COLORS, 'dashDonutApproval')}
+        </div>
+      </div>` : ''}
 
       <div class="sum-section">
         <div class="sum-section-head"><span class="icon">🐞</span><h2 style="color:var(--status-failed);">BUG REPORT SUMMARY</h2></div>
@@ -82,11 +113,22 @@ const Dashboard = {
         <div class="card-head"><h3>Progress Testing per Module</h3></div>
         <div class="chart-box"><canvas id="dashBarProgress"></canvas></div>
       </div>
+
+      ${showApproval ? `<div class="card" style="margin-top:18px;">
+        <div class="card-head"><h3>Approval per Module</h3></div>
+        <div class="chart-box"><canvas id="dashBarApproval"></canvas></div>
+      </div>` : ''}
     `;
 
     this.donut('dashDonutSeverity', s.sevDist.counts, s.sevDist.colors);
     this.donut('dashDonutPriority', s.prioDist.counts, s.prioDist.colors);
     this.renderBar(tcs);
+    if (showApproval){
+      this.donut('dashDonutApproval', [a.approved, a.rejected, a.pending], this.APPROVAL_COLORS);
+      this.renderApprovalBar(tcs);
+    } else {
+      ['dashDonutApproval','approvalBar'].forEach(k => { if (this.charts[k]){ this.charts[k].destroy(); delete this.charts[k]; } });
+    }
   },
 
   sumCard(icon, label, value, sub, pct, color){
@@ -151,6 +193,28 @@ const Dashboard = {
           { label: 'Failed', data: modules.length ? failedData : [0], backgroundColor: '#D64550', borderRadius: 4 },
           { label: 'Open', data: modules.length ? otherData : [0], backgroundColor: '#8A93A6', borderRadius: 4 }
         ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } }
+      }
+    });
+  },
+
+  renderApprovalBar(tcs){
+    const modules = [...new Set(tcs.map(t => t.module).filter(Boolean))].slice(0, 8);
+    const series = ['approved','rejected','pending'].map(st =>
+      modules.map(m => tcs.filter(t => t.module === m && this.approvalState(t) === st).length));
+    const ctx = document.getElementById('dashBarApproval');
+    if (this.charts.approvalBar) this.charts.approvalBar.destroy();
+    this.charts.approvalBar = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: modules.length ? modules : ['Belum ada data'],
+        datasets: ['Approved','Rejected','Belum di-Approval'].map((label, i) => ({
+          label, data: modules.length ? series[i] : [0], backgroundColor: this.APPROVAL_COLORS[i], borderRadius: 4
+        }))
       },
       options: {
         responsive: true, maintainAspectRatio: false,

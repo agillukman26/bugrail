@@ -865,7 +865,7 @@ function importResultDialog({ same, added, failed, errors = [], updated = null }
       <h2 style="margin:0 0 12px;">Hasil Import</h2>
       <div class="import-cards">
         ${card('same', same, 'Data sama')}
-        ${updated != null ? card('ok', updated, 'Hasil testing diperbarui') : ''}
+        ${updated != null ? card('ok', updated, 'Diperbarui') : ''}
         ${card('ok', added, 'Berhasil di-import')}
         ${card('fail', failed, 'Gagal')}
       </div>

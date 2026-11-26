@@ -833,26 +833,36 @@ Alasan: ${a.note}` : ''}`);
     }
   },
 
-  /* Re-import of test cases already in this file: take the vendor's test result
-     (Status / Actual Result / Evidence) from the file. Never deletes or blanks
+  /* Re-import of test cases already in this file (same Module + Scenario + Test Case):
+     update them from the file instead of adding a copy. Never deletes or blanks
      anything: empty cells keep the app's value, "Open" in the file never undoes a
      result, and a non-Open status without any evidence keeps the old status. Returns { changed, rerun (status changed) }. */
+  IMPORT_UPDATE_FIELDS: ['roleUser', 'preconditions', 'testData', 'expectedResult', 'typeTest', 'actualResult', 'evidence'],
   applyImportedResults(dupRows, existing){
     const byKey = new Map(existing.map(t => [TC_IMPORT.dupKey(t), t]));
-    const changed = [], rerun = [];
+    const changed = [], rerun = [], repeats = [], done = new Set();
     dupRows.forEach(r => {
       const tc = byKey.get(TC_IMPORT.dupKey(r));
-      if (!tc || changed.includes(tc)) return;
-      const evidence = r.evidence || tc.evidence || '';
-      const actualResult = r.actualResult || tc.actualResult || '';
+      if (!tc) return;
+      /* Only the first row per test case counts. Before, a later repeat with other results
+         updated it whenever the first row matched, so re-importing the same file flipped it every time. */
+      if (done.has(tc)){ repeats.push(`${r.module} / ${r.scenario}${r.testCase ? ` / ${r.testCase}` : ''}`); return; }
+      done.add(tc);
+      // Excel line breaks (\r\n) and spaces at line ends don't count as an edit.
+      const same = (a, b) => String(a ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim() === String(b ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim();
+      const next = {};
+      this.IMPORT_UPDATE_FIELDS.forEach(k => { if (r[k] && !same(r[k], tc[k])) next[k] = r[k]; });
+      // Steps are stored as HTML: compare as text so an unchanged export doesn't count as an edit.
+      if (r.steps && !same(r.steps, stepsHtmlToText(tc.steps || ''))) next.steps = textToStepsHtml(r.steps);
+      const evidence = next.evidence || tc.evidence || '';
       let status = r.status && r.status !== 'Open' ? r.status : tc.status;
       if (status !== 'Open' && !String(evidence).trim()) status = tc.status;
-      if (status === tc.status && evidence === (tc.evidence || '') && actualResult === (tc.actualResult || '')) return;
-      if (status !== tc.status){ tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
-      Object.assign(tc, { status, evidence, actualResult });
+      if (status !== tc.status){ next.status = status; tc.executionDate = todayISO(); tc.lastRunAt = nowISO(); rerun.push(tc); }
+      if (!Object.keys(next).length) return;
+      Object.assign(tc, next);
       changed.push(tc);
     });
-    return { changed, rerun };
+    return { changed, rerun, repeats };
   },
 
   /* ---- Import (Excel/CSV) ---- */
@@ -884,13 +894,14 @@ Alasan: ${a.note}` : ''}`);
       const existing = App.state.testcases.filter(t => t.fileId === this.ui.activeFileId);
       const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows), existing);
       if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
-      const { changed: updated, rerun } = this.applyImportedResults(dup, existing);
+      const { changed: updated, rerun, repeats } = this.applyImportedResults(dup, existing);
+      if (repeats.length) errorList.push(`Baris dobel di file (pakai baris pertama, sisanya diabaikan): ${repeats.slice(0, 3).join('; ')}${repeats.length > 3 ? ` +${repeats.length - 3} lainnya` : ''}`);
       rerun.forEach(t => { t.executedBy = Auth.currentEmail() || ''; });
       const result = { same: dup.length - updated.length, updated: updated.length, added: rows.length, failed, errors: errorList };
       if (updated.length){
         App.saveTestcases();
         BugReportModule.draftFromTestCases(rerun); // only test cases whose status just changed
-        ActivityLog.record('testcase_update', `${updated.length} test case hasil testingnya diperbarui dari import: ${updated.slice(0, 20).map(tcCode).join(', ')}${updated.length > 20 ? `, +${updated.length - 20} lainnya` : ''}`);
+        ActivityLog.record('testcase_update', `${updated.length} test case diperbarui dari import: ${updated.slice(0, 20).map(tcCode).join(', ')}${updated.length > 20 ? `, +${updated.length - 20} lainnya` : ''}`);
         this.render();
       }
       if (!rows.length){ importResultDialog(result); return; }
