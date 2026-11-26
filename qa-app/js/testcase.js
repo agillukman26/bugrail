@@ -840,10 +840,14 @@ Alasan: ${a.note}` : ''}`);
   IMPORT_UPDATE_FIELDS: ['roleUser', 'preconditions', 'testData', 'expectedResult', 'typeTest', 'actualResult', 'evidence'],
   applyImportedResults(dupRows, existing){
     const byKey = new Map(existing.map(t => [TC_IMPORT.dupKey(t), t]));
-    const changed = [], rerun = [];
+    const changed = [], rerun = [], repeats = [], done = new Set();
     dupRows.forEach(r => {
       const tc = byKey.get(TC_IMPORT.dupKey(r));
-      if (!tc || changed.includes(tc)) return;
+      if (!tc) return;
+      /* Only the first row per test case counts. Before, a later repeat with other results
+         updated it whenever the first row matched, so re-importing the same file flipped it every time. */
+      if (done.has(tc)){ repeats.push(`${r.module} / ${r.scenario}${r.testCase ? ` / ${r.testCase}` : ''}`); return; }
+      done.add(tc);
       // Excel line breaks (\r\n) and spaces at line ends don't count as an edit.
       const same = (a, b) => String(a ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim() === String(b ?? '').replace(/[ \t]*\r?\n[ \t]*/g, '\n').trim();
       const next = {};
@@ -858,7 +862,7 @@ Alasan: ${a.note}` : ''}`);
       Object.assign(tc, next);
       changed.push(tc);
     });
-    return { changed, rerun };
+    return { changed, rerun, repeats };
   },
 
   /* ---- Import (Excel/CSV) ---- */
@@ -890,7 +894,8 @@ Alasan: ${a.note}` : ''}`);
       const existing = App.state.testcases.filter(t => t.fileId === this.ui.activeFileId);
       const { fresh: rows, dup } = TC_IMPORT.splitDuplicates(sheets.flatMap(s => s.rows), existing);
       if (!rows.length && !dup.length && !errors.length){ Toast.show('Tidak ada test case di file.', 'info'); return; }
-      const { changed: updated, rerun } = this.applyImportedResults(dup, existing);
+      const { changed: updated, rerun, repeats } = this.applyImportedResults(dup, existing);
+      if (repeats.length) errorList.push(`Baris dobel di file (pakai baris pertama, sisanya diabaikan): ${repeats.slice(0, 3).join('; ')}${repeats.length > 3 ? ` +${repeats.length - 3} lainnya` : ''}`);
       rerun.forEach(t => { t.executedBy = Auth.currentEmail() || ''; });
       const result = { same: dup.length - updated.length, updated: updated.length, added: rows.length, failed, errors: errorList };
       if (updated.length){
