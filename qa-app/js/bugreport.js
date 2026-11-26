@@ -1301,7 +1301,8 @@ const BugReportModule = {
               useTcSteps: !!(tc && !ownSteps && tc.steps), useTcExpected: !!(tc && !ownExpected && tc.expectedResult),
               tester: r.Tester || r.tester || Auth.currentEmail() || '', title, description: r.Description || r.description || '',
               actualResult, severity: r.Severity || r.severity || 'Medium',
-              priority: r.Priority || r.priority || 'Medium', status,
+              // Priority is PM's (bugreport_priority), same as the form: others import it empty.
+              priority: Auth.can('bugreport_priority') ? (r.Priority || r.priority || '') : '', status,
               assignee: r['Assign ke'] || r.assignee || '',
               environment: r.Environment || r.environment || '', browser: r.Browser || r.browser || '',
               os: r.OS || r.os || '', device: r.Device || r.device || '',
@@ -1419,10 +1420,11 @@ const BugReportModule = {
     // Failed-test-case template: steps / expected / tester / status come from the
     // test case and the importer on import, so only what a tester checks or types stays.
     if (failed.length) cols = cols.filter(c => this.TEMPLATE_FROM_TC_KEYS.includes(c.key));
+    if (!Auth.can('bugreport_priority')) cols = cols.filter(c => c.key !== 'priority'); // locked in the form too
     const rows = failed.length ? failed.map(t => ({
       testCaseId: tcCode(t), module: t.module || '', scenario: t.scenario || '', steps: stepsHtmlToText(t.steps || ''),
       expectedResult: t.expectedResult || '', tester: Auth.currentEmail() || '', actualResult: t.actualResult || '', title: '',
-      severity: 'Medium', priority: 'Medium', status: lists.status[0] || 'Open',
+      severity: 'Medium', priority: '', status: lists.status[0] || 'Open',
       // Test case evidence pre-filled like the form (URLs only) — the tester just adds more.
       attachments: (String(t.evidence || '').match(/https?:\/\/[^\s<>"']+/g) || []).join('\n')
     })) : [sample];
